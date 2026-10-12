@@ -1,0 +1,106 @@
+import 'reflect-metadata';
+import 'dotenv/config';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { PrismaClient } from '@prisma/client';
+import { NestFactory } from '@nestjs/core';
+import { json } from 'express';
+import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
+import { ContractsApplicationService } from '../src/modules/contracts/application/contracts.application-service';
+import { ContractsExchangeApplicationService } from '../src/modules/contracts/application/contracts-exchange.application-service';
+import { syntheticSource } from '../src/modules/contracts/domain/supply-fixtures';
+import type { ActorContext, SupplyDetail } from '@cpms/domain';
+
+async function main(){
+  const target=new URL(process.env.DATABASE_URL!);
+  assert(['localhost','127.0.0.1'].includes(target.hostname),'Requires approved local synthetic database');
+  const databaseName=`cpms_supply_test_${Date.now()}`;const adminUrl=new URL(target);adminUrl.pathname='/postgres';
+  const admin=new PrismaClient({datasourceUrl:adminUrl.href,log:[]});
+  try{await admin.$executeRawUnsafe(`CREATE DATABASE "${databaseName}"`);}finally{await admin.$disconnect();}
+  target.pathname=`/${databaseName}`;process.env.DATABASE_URL=target.href;
+  process.env.LOCAL_DEMO_CREDENTIALS='false';process.env.LOCAL_DEMO_IMPERSONATION='false';
+  process.env.AUTH_MODE='OPEN_DEMO';process.env.ALLOW_OPEN_DEMO='true';process.env.NODE_ENV='test';process.env.WEB_ORIGIN='http://localhost:5173';process.env.AI_MODE='OFF';
+  const actorId='00000000-0000-4000-8000-000000000099';process.env.DEMO_ACTOR_ID=actorId;
+  await mkdir('private-local/contracts-v1',{recursive:true});
+  const migrations=(await readdir('database/migrations')).filter(n=>/^\d/.test(n)).sort();
+  const sql=(await Promise.all(migrations.map(n=>readFile(path.join('database/migrations',n,'migration.sql'),'utf8')))).join('\n');
+  const sqlPath=path.resolve('private-local/contracts-v1/synthetic-migrations.sql');await writeFile(sqlPath,sql);
+  execFileSync(process.execPath,['node_modules/prisma/build/index.js','db','execute','--schema','database/schema.prisma','--file',sqlPath],{env:process.env,stdio:'pipe'});
+  const db=new PrismaService({datasourceUrl:target.href,log:[]});await db.$connect();
+  await db.role.upsert({where:{code:'ADMIN'},create:{code:'ADMIN',displayName:'Synthetic Admin',description:'Synthetic'},update:{}});
+  await db.actor.create({data:{id:actorId,key:'demo-superuser',displayName:'Synthetic Admin',loginEmail:'manager@example.test',accountKind:'LEGACY',roles:{create:{roleCode:'ADMIN'}}}});
+  await db.organizationUnit.createMany({data:[{code:'UNIT_A',displayName:'Unit A',category:'QUICK_SELECT',sourceProvider:'SYNTHETIC',displayOrder:1},{code:'UNIT_B',displayName:'Unit B',category:'QUICK_SELECT',sourceProvider:'SYNTHETIC',displayOrder:2}]});
+  const actor:ActorContext={id:actorId,key:'demo-superuser',displayName:'Synthetic Admin',roles:['ADMIN']};
+  const {AppModule}=await import('../src/app.module');
+  const app=await NestFactory.create(AppModule,{logger:false,bodyParser:false});app.setGlobalPrefix('api');app.use(json({limit:'10mb'}));await app.listen(0,'127.0.0.1');
+  const service=app.get(ContractsApplicationService);const checks:string[]=[];const check=(name:string)=>{checks.push(name);console.log(`PASS ${name}`);};
+  try{
+    const snapshot=syntheticSource();
+    // Prisma's JSON number reader can round the final digit. Preview/apply must preserve the source fingerprint.
+    snapshot.sheets[2]!.rows[0]!.push({value:'source_average'});
+    for(const row of snapshot.sheets[2]!.rows.slice(1))row.push({value:25333.333333333332,raw:{numberValue:25333.333333333332}});
+    const preview=await service.importPreview(snapshot,actor);assert.equal(preview.mode,'CREATE');assert.equal(preview.counts.allocations,3);
+    const initial=await service.importApply(preview.id,{idempotencyKey:randomUUID(),acknowledgeWarnings:true},actor);
+    const id=initial.contract.id;assert.equal(initial.slots.length,1);assert.equal(initial.allocations.length,3);assert.equal(initial.inventory.amountTotals.effective,'5000');check('real PostgreSQL import with typed data and zero usage');
+    const workspaceUrl=`${await app.getUrl()}/api/contracts/${id}/workspace`;
+    const workspaceResponse=await fetch(workspaceUrl);assert.equal(workspaceResponse.status,200);
+    const workspace=await workspaceResponse.json();assert.equal(workspace.period,'CURRENT');assert.equal(workspace.phase,'EFFECTIVE');
+    const initialResponse=await fetch(`${workspaceUrl}?period=ALL&phase=BASELINE`);assert.equal(initialResponse.status,200);
+    const initialWorkspace=await initialResponse.json();assert.equal(initialWorkspace.selectedPeriodIds.length,2);
+    assert.equal((await fetch(`${workspaceUrl}?period=invalid`)).status,400);assert.equal((await fetch(`${workspaceUrl}?phase=unknown`)).status,400);
+    assert.equal((await service.detail(id,actor)).contract.recordVersion,initial.contract.recordVersion);
+    check('read-only workspace HTTP defaults, VAT cuts, validation and unchanged version');
+    const repeat=await service.importPreview(snapshot,actor);assert.equal(repeat.mode,'NOOP');const repeated=await service.importApply(repeat.id,{idempotencyKey:randomUUID(),acknowledgeWarnings:true},actor);assert.equal(repeated.contract.recordVersion,initial.contract.recordVersion);assert.equal(await db.supplyContract.count(),1);assert.equal(await db.supplyAdjustmentGroup.count(),2);check('identical import no-op: no duplicate, no version bump, no cumulative double count');
+    const exchange=app.get(ContractsExchangeApplicationService);
+    const bundle=await exchange.exportBundle(id,actor);bundle.inventory.amountTotals.remaining='999999';
+    const exportedPreview=await exchange.previewJson(bundle,actor);assert.equal(exportedPreview.blocking.length,0);
+    const exportedApplied=await service.importApply(exportedPreview.id,{idempotencyKey:randomUUID(),acknowledgeWarnings:true},actor);assert.equal(exportedApplied.inventory.amountTotals.remaining,'5000');
+    const xlsx=await exchange.exportFile(id,actor);const filePreview=await exchange.previewFile(xlsx,actor);assert.equal(filePreview.counts.allocations,3);assert.equal(filePreview.counts.held,0);assert.equal(filePreview.blocking.length,0);
+    const fileApplied=await service.importApply(filePreview.id,{idempotencyKey:randomUUID(),acknowledgeWarnings:true},actor);assert.equal(fileApplied.inventory.amountTotals.effective,'5000');
+    const fileRepeat=await exchange.previewFile(xlsx,actor);assert.equal(fileRepeat.mode,'NOOP');check('JSON and XLSX round-trip preserve baseline and cumulative deltas; calculated usage is never input');
+    const changed=structuredClone(snapshot);const sh=changed.sheets[2]!;const set=(row:number,key:string,value:number)=>{sh.rows[row]![sh.rows[0]!.findIndex(c=>c.value===key)]!.value=value;};
+    set(1,'adjustment_qty',-12);set(1,'adjustment_amount_no_vat',-1200);set(1,'effective_qty',28);set(1,'effective_amount_no_vat',2800);
+    const changedPreview=await service.importPreview(changed,actor);assert.equal(changedPreview.mode,'UPDATE');let detail=await service.importApply(changedPreview.id,{idempotencyKey:randomUUID(),acknowledgeWarnings:true},actor);assert.equal(detail.inventory.amountTotals.effective,'4800');assert.equal(detail.adjustments.filter(g=>g.status==='SOURCE_APPLIED').length,1);check('new snapshot supersedes cumulative group while preserving history');
+    const allocation=detail.allocations.find(a=>a.sourceKey==='A-1')!;const allocationB=detail.allocations.find(a=>a.sourceKey==='A-2')!;
+    const adjustment={expectedVersion:detail.contract.recordVersion,fields:{kind:'TRANSFER',name:'Synthetic transfer',reason:'Synthetic reallocation',evidence:'SYNTHETIC-REF',effectiveDate:'2026-09-10',lines:[{allocationId:allocation.id,expectedAllocationVersion:allocation.recordVersion,deltaQty:'-2',deltaAmount:'-200'},{allocationId:allocationB.id,expectedAllocationVersion:allocationB.recordVersion,deltaQty:'2',deltaAmount:'200'}]}};
+    const impact=await service.adjustmentPreview(id,adjustment,actor);assert.equal(impact.changes.length,2);detail=await service.saveAdjustment(id,adjustment,actor);assert.equal(detail.inventory.amountTotals.effective,'4800');check('draft adjustment preview has no effect on inventory');
+    const inconsistent={...adjustment,expectedVersion:detail.contract.recordVersion,fields:{...adjustment.fields,lines:[{allocationId:allocation.id,expectedAllocationVersion:allocation.recordVersion,deltaQty:'-2',deltaAmount:'-1'},{allocationId:allocationB.id,expectedAllocationVersion:allocationB.recordVersion,deltaQty:'2',deltaAmount:'1'}]}};
+    await assert.rejects(service.adjustmentPreview(id,inconsistent,actor));
+    const converted=await service.adjustmentPreview(id,{...adjustment,expectedVersion:detail.contract.recordVersion,fields:{...adjustment.fields,lines:adjustment.fields.lines.map(l=>({...l,deltaQty:null}))}},actor);assert.equal(converted.changes[0]!.delta.qty,'-2');check('adjustment preview derives quantity from money and rejects conflicting independent inputs');
+    const groupId=detail.adjustments.find(g=>g.name==='Synthetic transfer')!.id;
+    const transition=async(action:string,d:SupplyDetail,key=randomUUID())=>service.transition(id,'adjustment',groupId,{expectedVersion:d.contract.recordVersion,recordVersion:d.adjustments.find(g=>g.id===groupId)!.recordVersion,action,idempotencyKey:key},actor);
+    detail=await transition('SUBMIT',detail);const approveBody={expectedVersion:detail.contract.recordVersion,recordVersion:detail.adjustments.find(g=>g.id===groupId)!.recordVersion,action:'APPROVE',idempotencyKey:randomUUID()};
+    detail=await service.transition(id,'adjustment',groupId,approveBody,actor);assert.equal(detail.inventory.amountTotals.effective,'4800');const version=detail.contract.recordVersion;
+    detail=await service.transition(id,'adjustment',groupId,approveBody,actor);assert.equal(detail.contract.recordVersion,version);assert.equal(detail.adjustments.find(g=>g.id===groupId)!.approvedByActorId,actorId);check('atomic group approval with audit, version and retry idempotency');
+    await assert.rejects(service.saveContract(id,{expectedVersion:1,fields:{name:'stale'}},actor));
+    const active=detail.allocations.find(a=>a.id===allocation.id)!;await assert.rejects(service.saveAllocation(id,{expectedVersion:detail.contract.recordVersion,id:active.id,recordVersion:active.recordVersion,fields:{slotId:active.slotId,period:{code:'2026',name:'2026',kind:'YEAR',startDate:'2026-01-01',endDate:'2026-12-31'},beneficiaryUnitCode:'UNIT_A',scopeKind:'ENTITLEMENT',limitMode:'HARD_LIMIT',basis:'QTY',value:'50'}},actor));
+    const protectedPreview=await service.importPreview(snapshot,actor);assert.equal(protectedPreview.mode,'CONFLICT');check('stale requests and active baseline edits rejected; local edits protected on reimport');
+    const invalidActor={...actor,id:randomUUID()};await assert.rejects(service.saveContract(null,{fields:{name:'forbidden'}},invalidActor));check('caller supplied ADMIN roles cannot forge authenticated identity');
+    const url=await app.getUrl();const response=await fetch(`${url}/api/contracts/${id}`);assert.equal(response.status,200);const wire=await response.json() as SupplyDetail;assert.equal(typeof wire.contract.signedAmount,'string');
+    const bad=await fetch(`${url}/api/contracts/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:detail.contract.recordVersion,fields:{effectiveAmount:'999'}})});assert.equal(bad.status,400);check('real HTTP route and payload validation; calculated fields cannot be written');
+    detail=await service.transition(id,'adjustment',groupId,{expectedVersion:detail.contract.recordVersion,recordVersion:detail.adjustments.find(g=>g.id===groupId)!.recordVersion,action:'REVERSE',idempotencyKey:randomUUID(),reason:'Synthetic reversal',effectiveDate:'2026-09-10'},actor);const reversal=detail.adjustments.find(g=>g.reversesId===groupId)!;assert.equal(reversal.status,'DRAFT');
+    detail=await service.transition(id,'adjustment',reversal.id,{expectedVersion:detail.contract.recordVersion,recordVersion:reversal.recordVersion,action:'SUBMIT',idempotencyKey:randomUUID()},actor);
+    detail=await service.transition(id,'adjustment',reversal.id,{expectedVersion:detail.contract.recordVersion,recordVersion:detail.adjustments.find(g=>g.id===reversal.id)!.recordVersion,action:'APPROVE',idempotencyKey:randomUUID()},actor);assert.equal(detail.adjustments.find(g=>g.id===groupId)!.status,'APPROVED');check('reversal appends compensating delta and retains approved history');
+    const savedVersion=detail.contract.recordVersion;const slot=detail.slots[0]!;
+    detail=await service.saveSlot(id,{expectedVersion:savedVersion,id:slot.id,recordVersion:slot.recordVersion,fields:{name:slot.name,bookerEmails:slot.bookers.map(b=>b.email)}},actor);assert.equal(detail.contract.recordVersion,savedVersion);check('no-op slot save preserves version, including linked bookers');
+    const concurrentGroups:string[]=[];
+    for(const [index,a] of detail.allocations.filter(a=>a.status==='APPROVED').entries()){
+      detail=await service.saveAdjustment(id,{expectedVersion:detail.contract.recordVersion,fields:{kind:'ADD',name:`Concurrent ${index}`,reason:'Synthetic concurrency test',evidence:'SYN-CONCURRENT',effectiveDate:'2026-09-10',lines:[{allocationId:a.id,expectedAllocationVersion:a.recordVersion,deltaQty:'30',deltaAmount:'3000'}]}},actor);
+      const group=detail.adjustments.find(g=>g.name===`Concurrent ${index}`)!;concurrentGroups.push(group.id);
+      detail=await service.transition(id,'adjustment',group.id,{expectedVersion:detail.contract.recordVersion,recordVersion:group.recordVersion,action:'SUBMIT',idempotencyKey:randomUUID()},actor);
+    }
+    const results=await Promise.allSettled(concurrentGroups.map(groupId=>service.transition(id,'adjustment',groupId,{expectedVersion:detail.contract.recordVersion,recordVersion:detail.adjustments.find(g=>g.id===groupId)!.recordVersion,action:'APPROVE',idempotencyKey:randomUUID()},actor)));
+    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);detail=await service.detail(id,actor);assert.equal(detail.inventory.amountTotals.effective,'7800');
+    const pending=detail.adjustments.find(g=>concurrentGroups.includes(g.id)&&g.status==='PENDING')!;const beforeFailed=detail.contract.recordVersion;
+    await assert.rejects(service.transition(id,'adjustment',pending.id,{expectedVersion:detail.contract.recordVersion,recordVersion:pending.recordVersion,action:'APPROVE',idempotencyKey:randomUUID()},actor));
+    detail=await service.detail(id,actor);assert.equal(detail.contract.recordVersion,beforeFailed);assert.equal(detail.adjustments.find(g=>g.id===pending.id)!.status,'PENDING');assert.equal(detail.inventory.amountTotals.effective,'7800');check('concurrent sibling approvals serialize at parent cap; rebased excess command rolls back completely');
+    await assert.rejects(service.saveContract(id,{expectedVersion:detail.contract.recordVersion,fields:{signedAmount:'11000',signedGross:'11800'}},actor));
+    detail=await service.saveContract(id,{expectedVersion:detail.contract.recordVersion,fields:{signedAmount:'11000',signedGross:'11800'},legalReason:'Synthetic amendment',legalEvidence:'SYN-LEGAL'},actor);assert.equal(detail.legalRevisions.length,1);assert.equal(detail.inventory.amountTotals.effective,'7800');check('legal amendment records evidence and revision without changing operational allocations');
+    assert.equal(await db.campaign.count(),0);assert.equal(await db.materialRecord.count(),0);
+    await writeFile('private-local/contracts-v1/integration-result.json',JSON.stringify({databaseName,checks,status:'PASS'}));
+  }finally{await app.close();await db.$disconnect();}
+}
+main().catch(e=>{console.error(e instanceof Error?e.message:'Synthetic supply integration failed');process.exitCode=1;});

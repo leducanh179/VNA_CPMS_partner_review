@@ -1,0 +1,12 @@
+import { useState } from 'react';
+import { Button } from '@cpms/ui';
+import type { ContractChangeRequest, ContractManagementWorkspace } from '@cpms/domain';
+import { ContractDialog } from './contract-management';
+import { requestJson } from '../lib/api';
+import { contractsChanged } from '../lib/contract-management';
+export function ContractPeriodEditor({workspace,request,onClose,onSaved}:{workspace:ContractManagementWorkspace;request?:ContractChangeRequest;onClose:()=>void;onSaved:()=>void}){
+ const initial=request?.fields.newPeriod as {id:string;name:string;startDate:string;endDate:string}|undefined;
+ const [period,setPeriod]=useState(initial??{id:crypto.randomUUID(),name:'',startDate:workspace.contract.startDate??'',endDate:workspace.contract.endDate??''}),[reason,setReason]=useState(request?.reason??''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const save=async(mode:'SUBMIT'|'SELF_APPROVE')=>{setBusy(true);try{await requestJson('/contracts/'+workspace.contract.id+'/changes',{method:'POST',body:JSON.stringify({expectedVersion:workspace.contract.recordVersion,kind:'EDIT',fields:{},newPeriod:period,mode,reason,idempotencyKey:crypto.randomUUID(),...(request?{requestId:request.id,expectedRequestVersion:request.recordVersion}:{})})});contractsChanged();onSaved();}catch(e){setError(e instanceof Error?e.message:'Không lưu được kỳ.');}finally{setBusy(false);}};
+ return <ContractDialog title="Thêm kỳ phân bổ" busy={busy} onClose={onClose}><div className="space-y-3"><p className="text-sm text-slate-600">Tạo kỳ trước khi nhập hạng mục. Kỳ mới phải nằm trong hợp đồng và không trùng kỳ phân bổ hiện có.</p>{(['name','startDate','endDate'] as const).map((k,i)=><label key={k} className="block text-sm">{['Tên kỳ','Từ ngày','Đến ngày'][i]}<input className="mt-1 block w-full rounded-lg border p-2" type={k==='name'?'text':'date'} value={period[k]} onChange={e=>setPeriod(p=>({...p,[k]:e.target.value}))}/></label>)}<label className="block text-sm">Lý do<textarea className="mt-1 block w-full rounded-lg border p-2" value={reason} onChange={e=>setReason(e.target.value)}/></label>{error&&<p role="alert" className="text-rose-700">{error}</p>}<div className="flex gap-2"><Button disabled={busy} onClick={()=>void save('SUBMIT')}>{workspace.policy.required?'Gửi duyệt':'Lưu kỳ'}</Button>{workspace.capabilities.approve&&workspace.policy.required&&<Button disabled={busy} variant="secondary" onClick={()=>void save('SELF_APPROVE')}>Lưu và tự duyệt</Button>}</div></div></ContractDialog>;
+}

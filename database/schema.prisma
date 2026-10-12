@@ -1,0 +1,1846 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CampaignLifecycleState {
+  DRAFT
+  SUBMITTED_TO_DEPARTMENT
+  DEPARTMENT_ASSIGNED
+  DIVISION_ASSIGNED
+  CM_ACCEPTED
+  PLANNING
+  READY_TO_LAUNCH
+  RUNNING
+  PAUSE_REQUESTED
+  PAUSED
+  RESUME_REQUESTED
+  CANCEL_REQUESTED
+  CANCELLED
+  COMPLETED
+  ARCHIVED
+}
+
+enum CampaignNormalizationStatus {
+  CURRENT
+  NEEDS_NORMALIZATION
+}
+
+enum CampaignMarketSelectionOrigin {
+  CUSTOM
+  REGION
+  GLOBAL
+  LEGACY
+}
+
+enum OrganizationUnitCategory {
+  QUICK_SELECT
+  FOREIGN_BRANCH
+}
+
+enum CampaignCommentReactionType {
+  LIKE
+  DISLIKE
+}
+
+model Role {
+  code        String      @id
+  displayName String      @map("display_name")
+  description String
+  actorRoles  ActorRole[]
+  scopedBindings ScopedRoleBinding[]
+  permissionPresets RolePermission[]
+  recordVersion Int @default(1) @map("record_version")
+  presetInitialized Boolean @default(false) @map("preset_initialized")
+
+  @@map("roles")
+}
+
+model Supplier {
+  id String @id @default(uuid()) @db.Uuid
+  code String @unique
+  name String
+  normalizedName String @unique @map("normalized_name")
+  taxId String? @unique @map("tax_id")
+  profile Json @db.JsonB
+  isActive Boolean @default(true) @map("is_active")
+  recordVersion Int @default(1) @map("record_version")
+  contracts SupplyContract[]
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@map("suppliers")
+}
+
+model PersonalNote {
+  id String @id @default(uuid()) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  title String
+  document Json @db.JsonB
+  searchText String @map("search_text")
+  color String @default("YELLOW")
+  pinned Boolean @default(false)
+  recordVersion Int @default(1) @map("record_version")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@index([actorId, pinned, title])
+  @@map("personal_notes")
+}
+
+model DirectoryExternalIdentity {
+  provider String
+  externalId String @map("external_id")
+  employeeCode String @map("employee_code")
+  person PersonnelDirectoryEntry @relation(fields: [employeeCode], references: [employeeCode], onDelete: Restrict)
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(3)
+  sourceUpdatedAt DateTime? @map("source_updated_at") @db.Timestamptz(3)
+  @@id([provider, externalId])
+  @@unique([provider, employeeCode])
+  @@map("directory_external_identities")
+}
+
+model DirectorySyncRun {
+  provider String
+  batchId String @map("batch_id")
+  digest String
+  capturedAt DateTime @map("captured_at") @db.Timestamptz(3)
+  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz(3)
+  actorId String @map("actor_id") @db.Uuid
+  result Json @db.JsonB
+  @@id([provider, batchId])
+  @@map("directory_sync_runs")
+}
+
+model SupplyItemTerm {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  slotId String @map("slot_id") @db.Uuid
+  periodId String @map("period_id") @db.Uuid
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  slot SupplySlot @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  period SupplyPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  baseline Json? @db.JsonB
+  effective Json @db.JsonB
+  recordVersion Int @default(1) @map("record_version")
+  @@unique([slotId, periodId])
+  @@map("supply_item_terms")
+}
+
+model Actor {
+  initializedQcttPlans QcttPlan[] @relation("QcttPlanInitializer")
+  createdQcttPlanItems QcttPlanItem[]
+  qcttPlanItemRevisions QcttPlanItemRevision[]
+  qcttPlanCommands QcttPlanCommand[]
+  personalNotes PersonalNote[]
+  campaignFormDrafts CampaignFormDraft[]
+  materialFormDrafts MaterialFormDraft[]
+  contractFormDrafts ContractFormDraft[]
+  gridDrafts GridDraft[]
+  supplyPivotViews SupplyPivotView[]
+  createdBookings BookingRecord[]
+  bookingRevisions BookingRevision[]
+  managedSupplyContracts SupplyContract[] @relation("SupplyManager")
+  id          String       @id @default(uuid()) @db.Uuid
+  key         String       @unique
+  displayName String       @map("display_name")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  roles       ActorRole[]
+  campaigns   Campaign[]   @relation("CampaignCreatedBy")
+  deletedCampaigns Campaign[] @relation("CampaignDeletedBy")
+  auditEvents AuditEvent[] @relation("AuditEffectiveActor")
+  originalAuditEvents AuditEvent[] @relation("AuditOriginalActor")
+  requestedCampaignChanges CampaignChangeRequest[] @relation("CampaignChangeRequester")
+  decidedCampaignChanges CampaignChangeRequest[] @relation("CampaignChangeDecider")
+  createdCampaignPlans CampaignPlan[]
+  googleOAuthConnection GoogleOAuthConnection?
+  googleOAuthStates GoogleOAuthState[]
+  connectedDriveIntegrations GoogleDriveIntegrationConnection[]
+  spreadsheetExchangeOperations SpreadsheetExchangeOperation[]
+  campaignComments CampaignComment[] @relation("CampaignCommentAuthor")
+  deletedCampaignComments CampaignComment[] @relation("CampaignCommentDeletedBy")
+  campaignCommentReactions CampaignCommentReaction[]
+  materialComments MaterialComment[]
+  // LEGACY, PERSONNEL or PILOT_ADMIN; the SQL check keeps pilot admins unlinked to personnel.
+  accountKind String @default("LEGACY") @map("account_kind")
+  personnelEmployeeCode String? @unique @map("personnel_employee_code")
+  loginEmail String? @unique @map("login_email")
+  authzVersion Int @default(1) @map("authz_version")
+  personnel PersonnelDirectoryEntry? @relation(fields: [personnelEmployeeCode], references: [employeeCode], onDelete: Restrict)
+  credential LocalCredential?
+  originalSessions LocalSession[] @relation("SessionOriginalActor")
+  effectiveSessions LocalSession[] @relation("SessionEffectiveActor")
+  employment EmploymentMembership?
+  scopedBindings ScopedRoleBinding[]
+  permissionOverrides AccountPermissionOverride[]
+  participations CampaignParticipant[] @relation("CampaignParticipantActor")
+  assignedParticipations CampaignParticipant[] @relation("CampaignParticipantAssigner")
+  approvalPolicyVersions ApprovalPolicyVersion[]
+  submittedWorkflowRevisions CampaignWorkflowRevision[]
+  createdWorkflowSteps CampaignWorkflowStep[] @relation("WorkflowStepCreator")
+  assignedWorkflowSteps CampaignWorkflowStep[] @relation("WorkflowStepAssignee")
+  workflowDecisions CampaignWorkflowDecision[] @relation("WorkflowDecisionActor")
+  originalWorkflowDecisions CampaignWorkflowDecision[] @relation("WorkflowDecisionOriginal")
+  workflowAssignments CampaignWorkflowAssignment[] @relation("WorkflowAssignmentActor")
+  assignedWorkflowAssignments CampaignWorkflowAssignment[] @relation("WorkflowAssignmentAssigner")
+  sentCooperationRequests CampaignCooperationRequest[] @relation("CooperationRequester")
+  targetedCooperationRequests CampaignCooperationRequest[] @relation("CooperationTarget")
+  respondedCooperationRequests CampaignCooperationRequest[] @relation("CooperationResponder")
+  workflowCommands CampaignWorkflowCommand[] @relation("WorkflowCommandActor")
+  originalWorkflowCommands CampaignWorkflowCommand[] @relation("WorkflowCommandOriginal")
+
+  @@map("actors")
+}
+
+model ActorRole {
+  actorId  String   @map("actor_id") @db.Uuid
+  roleCode String   @map("role_code")
+  actor    Actor    @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  role     Role     @relation(fields: [roleCode], references: [code], onDelete: Restrict)
+  grantedAt DateTime @default(now()) @map("granted_at") @db.Timestamptz(3)
+
+  @@id([actorId, roleCode])
+  @@index([roleCode])
+  @@map("actor_roles")
+}
+
+model Campaign {
+  qcttPlan QcttPlan?
+  bookings BookingRecord[]
+  id                      String                      @id @default(uuid()) @db.Uuid
+  code                    String                      @unique
+  name                    String
+  requestingUnit          String?                     @map("requesting_unit")
+  lifecycleState          CampaignLifecycleState      @default(DRAFT) @map("lifecycle_state")
+  startDate               DateTime?                   @map("start_date") @db.Date
+  endDate                 DateTime?                   @map("end_date") @db.Date
+  effectiveStartDate      DateTime?                   @map("effective_start_date") @db.Date
+  effectiveEndDate        DateTime?                   @map("effective_end_date") @db.Date
+  levelCode               String?                     @map("level_code")
+  requestingEmployeeCode  String?                     @map("requesting_employee_code")
+  manualRequesterEmail    String?                     @map("manual_requester_email")
+  primaryObjectiveCode    String?                     @map("primary_objective_code")
+  primaryObjectiveOther   String?                     @map("primary_objective_other")
+  kpiText                 String?                     @map("kpi_text")
+  descriptionRichText     Json?                       @map("description_rich_text")
+  additionalInformation   Json                        @default("[]") @map("additional_information")
+  dataSchemaVersion       Int                         @default(1) @map("data_schema_version")
+  normalizationStatus     CampaignNormalizationStatus @default(NEEDS_NORMALIZATION) @map("normalization_status")
+  fieldValues             Json                        @default("{}") @map("field_values")
+  recordVersion           Int                         @default(1) @map("record_version")
+  deletedAt               DateTime?                   @map("deleted_at") @db.Timestamptz(3)
+  deletedByActorId String?               @map("deleted_by_actor_id") @db.Uuid
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdByActorId String                @map("created_by_actor_id") @db.Uuid
+  createdBy       Actor                  @relation("CampaignCreatedBy", fields: [createdByActorId], references: [id], onDelete: Restrict)
+  deletedBy       Actor?                 @relation("CampaignDeletedBy", fields: [deletedByActorId], references: [id], onDelete: Restrict)
+  level           CampaignLevel?         @relation(fields: [levelCode], references: [code], onDelete: Restrict)
+  requestingEmployee PersonnelDirectoryEntry? @relation(fields: [requestingEmployeeCode], references: [employeeCode], onDelete: Restrict)
+  primaryObjective CampaignObjective?    @relation(fields: [primaryObjectiveCode], references: [code], onDelete: Restrict)
+  markets         CampaignMarket[]
+  provinces       CampaignProvince[]
+  requestingUnits CampaignRequestingUnit[]
+  driveWorkspace  CampaignDriveWorkspace?
+  comments        CampaignComment[]
+  scopedRoleBindings ScopedRoleBinding[]
+  permissionOverrides AccountPermissionOverride[]
+  participants CampaignParticipant[]
+  requestingDepartmentId String? @map("requesting_department_id") @db.Uuid
+  requestingDivisionId String? @map("requesting_division_id") @db.Uuid
+  requestingDepartment EmploymentOrgUnit? @relation("CampaignRequestingDepartment", fields: [requestingDepartmentId], references: [id], onDelete: Restrict)
+  requestingDivision EmploymentOrgUnit? @relation("CampaignRequestingDivision", fields: [requestingDivisionId], references: [id], onDelete: Restrict)
+  businessRevision Int @default(1) @map("business_revision")
+  workflow CampaignWorkflow?
+  approvalPolicyVersions ApprovalPolicyVersion[]
+  workflowCommands CampaignWorkflowCommand[]
+
+  @@index([lifecycleState])
+  @@index([requestingUnit])
+  @@index([levelCode])
+  @@index([requestingEmployeeCode])
+  @@index([primaryObjectiveCode])
+  @@index([normalizationStatus])
+  @@index([deletedAt, updatedAt])
+  @@map("campaigns")
+}
+
+// Private, incomplete form state. It is not a Campaign and has no workflow or Drive side effects.
+model CampaignFormDraft {
+  id String @id @db.Uuid
+  ownerActorId String @map("owner_actor_id") @db.Uuid
+  owner Actor @relation(fields: [ownerActorId], references: [id], onDelete: Restrict)
+  title String @default("")
+  levelCode String? @map("level_code")
+  formData Json @map("form_data") @db.JsonB
+  recordVersion Int @default(1) @map("record_version")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([ownerActorId, updatedAt])
+  @@map("campaign_form_drafts")
+}
+
+// Actor-private spreadsheet buffer. Never contributes to supply, approvals or reporting.
+model GridDraft {
+  id String @id @default(uuid()) @db.Uuid
+  ownerActorId String @map("owner_actor_id") @db.Uuid
+  owner Actor @relation(fields: [ownerActorId], references: [id], onDelete: Restrict)
+  scope String
+  value Json @db.JsonB
+  recordVersion Int @default(1) @map("record_version")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([ownerActorId, scope])
+  @@map("grid_drafts")
+}
+
+// Private, incomplete Material input. It is not a MaterialRecord and is visible only to its creator.
+model MaterialFormDraft {
+  id String @id @db.Uuid
+  ownerActorId String @map("owner_actor_id") @db.Uuid
+  owner Actor @relation(fields: [ownerActorId], references: [id], onDelete: Restrict)
+  materialId String? @map("material_id") @db.Uuid
+  title String @default("")
+  formData Json @map("form_data") @db.JsonB
+  recordVersion Int @default(1) @map("record_version")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([ownerActorId, updatedAt])
+  @@map("material_form_drafts")
+}
+
+// Private, incomplete Contract or owned-channel input. Not an active supply contract.
+model ContractFormDraft {
+  id String @id @db.Uuid
+  ownerActorId String @map("owner_actor_id") @db.Uuid
+  owner Actor @relation(fields: [ownerActorId], references: [id], onDelete: Restrict)
+  kind String
+  title String @default("")
+  activityCode String? @map("activity_code")
+  formData Json @map("form_data") @db.JsonB
+  recordVersion Int @default(1) @map("record_version")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([ownerActorId, updatedAt])
+  @@map("contract_form_drafts")
+}
+
+model CampaignDriveWorkspace {
+  campaignId                 String   @id @map("campaign_id") @db.Uuid
+  sharedDriveId              String   @map("shared_drive_id")
+  parentFolderId             String   @map("parent_folder_id")
+  campaignFolderId           String?  @unique @map("campaign_folder_id")
+  campaignFolderLink         String?  @map("campaign_folder_link")
+  lastKnownFolderName        String?  @map("last_known_folder_name")
+  baseDocumentsFolderId      String?  @map("base_documents_folder_id")
+  mediaAssetsFolderId        String?  @map("media_assets_folder_id")
+  otherDocumentsFolderId     String?  @map("other_documents_folder_id")
+  templateVersion            Int      @default(1) @map("template_version")
+  accessMode                 String   @default("CPMS_VISIBILITY_ONLY") @map("access_mode")
+  sharingMode                String   @default("PARENT_INHERITED") @map("sharing_mode")
+  permissionPolicyVersion    Int      @default(1) @map("permission_policy_version")
+  syncStatus                 String   @default("NOT_CREATED") @map("sync_status")
+  lifecycleStatus            String   @default("ACTIVE") @map("lifecycle_status")
+  lastCheckedAt              DateTime? @map("last_checked_at") @db.Timestamptz(3)
+  lastErrorCode              String?  @map("last_error_code")
+  lastErrorMessage           String?  @map("last_error_message")
+  googlePermissionId         String?  @map("google_permission_id")
+  desiredRole                String?  @map("desired_role")
+  permissionSyncStatus       String?  @map("permission_sync_status")
+  createdAt                  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  campaign                   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([syncStatus, updatedAt])
+  @@index([lifecycleStatus, updatedAt])
+  @@map("campaign_drive_workspaces")
+}
+
+model CampaignLevel {
+  code            String     @id
+  label           String
+  ruleDescription String     @map("rule_description")
+  displayOrder    Int        @map("display_order")
+  isActive        Boolean    @default(true) @map("is_active")
+  campaigns       Campaign[]
+
+  @@map("campaign_levels")
+}
+
+model CampaignObjective {
+  code              String     @id
+  label             String
+  requiresOtherText Boolean    @default(false) @map("requires_other_text")
+  displayOrder      Int        @map("display_order")
+  isActive          Boolean    @default(true) @map("is_active")
+  campaigns         Campaign[]
+
+  @@map("campaign_objectives")
+}
+
+model MarketRegion {
+  code         String   @id
+  name         String
+  displayOrder Int      @map("display_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  markets      Market[]
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("market_regions")
+}
+
+model Market {
+  supplySlots SupplySlot[]
+  code             String             @id
+  name             String
+  regionCode       String             @map("region_code")
+  displayOrder     Int                @map("display_order")
+  isActive         Boolean            @default(true) @map("is_active")
+  region           MarketRegion       @relation(fields: [regionCode], references: [code], onDelete: Restrict)
+  campaignMarkets  CampaignMarket[]
+  organizationUnits OrganizationUnit[]
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([regionCode, isActive, displayOrder])
+  @@map("markets")
+}
+
+model CampaignMarket {
+  campaignId      String                        @map("campaign_id") @db.Uuid
+  marketCode      String                        @map("market_code")
+  selectionOrigin CampaignMarketSelectionOrigin @default(CUSTOM) @map("selection_origin")
+  selectionCode   String?                       @map("selection_code")
+  createdAt       DateTime                      @default(now()) @map("created_at") @db.Timestamptz(3)
+  campaign        Campaign                      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  market          Market                        @relation(fields: [marketCode], references: [code], onDelete: Restrict)
+
+  @@id([campaignId, marketCode])
+  @@index([marketCode])
+  @@map("campaign_markets")
+}
+
+model Province {
+  code       String             @id
+  name       String
+  displayOrder Int              @map("display_order")
+  isActive   Boolean            @default(true) @map("is_active")
+  campaigns  CampaignProvince[]
+
+  @@map("provinces")
+}
+
+model CampaignProvince {
+  campaignId String   @map("campaign_id") @db.Uuid
+  provinceCode String @map("province_code")
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  province   Province @relation(fields: [provinceCode], references: [code], onDelete: Restrict)
+
+  @@id([campaignId, provinceCode])
+  @@index([provinceCode])
+  @@map("campaign_provinces")
+}
+
+model OrganizationUnit {
+  supplyContracts SupplyContract[]
+  supplyAllocations SupplyAllocation[]
+  code           String                   @id
+  displayName    String                   @map("display_name")
+  sourceName     String?                  @map("source_name")
+  category       OrganizationUnitCategory
+  sourceProvider String                   @map("source_provider")
+  sourceUnitId   String?                  @unique @map("source_unit_id")
+  sourceUnitCode String?                  @map("source_unit_code")
+  marketCode     String?                  @map("market_code")
+  displayOrder   Int                      @map("display_order")
+  isActive       Boolean                  @default(true) @map("is_active")
+  market         Market?                  @relation(fields: [marketCode], references: [code], onDelete: Restrict)
+  campaigns      CampaignRequestingUnit[]
+  employmentMappings EmploymentOrgUnit[]
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([category, isActive, displayOrder])
+  @@index([marketCode])
+  @@map("organization_units")
+}
+
+model CampaignRequestingUnit {
+  id                   String            @id @default(uuid()) @db.Uuid
+  campaignId           String            @map("campaign_id") @db.Uuid
+  organizationUnitCode String?           @map("organization_unit_code")
+  customName           String?           @map("custom_name")
+  displayOrder         Int               @default(0) @map("display_order")
+  campaign             Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  organizationUnit     OrganizationUnit? @relation(fields: [organizationUnitCode], references: [code], onDelete: Restrict)
+
+  @@unique([campaignId, organizationUnitCode])
+  @@index([organizationUnitCode])
+  @@map("campaign_requesting_units")
+}
+
+model PersonnelDirectoryEntry {
+  externalIdentities DirectoryExternalIdentity[]
+  supplyBookers SupplySlotBooker[]
+  employeeCode       String     @id @map("employee_code")
+  fullName           String     @map("full_name")
+  gender             String?
+  organizationCode   String?    @map("organization_code")
+  organizationName   String     @map("organization_name")
+  departmentName     String?    @map("department_name")
+  jobTitle           String?    @map("job_title")
+  phoneText          String?    @map("phone_text")
+  email              String?
+  gmailEmail         String?    @map("gmail_email")
+  birthYear          Int?       @map("birth_year")
+  birthDate          DateTime?  @map("birth_date") @db.Date
+  sourceProvider     String     @map("source_provider")
+  isActive           Boolean    @default(true) @map("is_active")
+  requestedCampaigns Campaign[]
+  account Actor?
+  displayGroup String? @map("display_group")
+  sourceReference String? @map("source_reference")
+  recordVersion Int @default(1) @map("record_version")
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([fullName])
+  @@index([email])
+  @@index([organizationCode, departmentName])
+  @@map("personnel_directory_entries")
+}
+
+model ContentPillar {
+  code           String          @id
+  label          String
+  year           Int
+  level          Int
+  parentCode     String?         @map("parent_code")
+  effectiveStart DateTime?       @map("effective_start") @db.Date
+  effectiveEnd   DateTime?       @map("effective_end") @db.Date
+  isActive       Boolean         @default(true) @map("is_active")
+  parent         ContentPillar?  @relation("ContentPillarTree", fields: [parentCode], references: [code], onDelete: Restrict)
+  children       ContentPillar[] @relation("ContentPillarTree")
+
+  @@index([year, level, isActive])
+  @@index([parentCode])
+  @@map("content_pillars")
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String   @map("actor_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  payload    Json
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  actor      Actor    @relation("AuditEffectiveActor", fields: [actorId], references: [id], onDelete: Restrict)
+  originalActor Actor? @relation("AuditOriginalActor", fields: [originalActorId], references: [id], onDelete: Restrict)
+  originalActorId String? @map("original_actor_id") @db.Uuid
+  contextMode String? @map("context_mode")
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_events")
+}
+
+model CampaignComment {
+  id               String   @id @default(uuid()) @db.Uuid
+  campaignId       String   @map("campaign_id") @db.Uuid
+  authorActorId    String   @map("author_actor_id") @db.Uuid
+  body             String
+  parentCommentId  String?  @map("parent_comment_id") @db.Uuid
+  replyToCommentId String?  @map("reply_to_comment_id") @db.Uuid
+  recordVersion    Int      @default(1) @map("record_version")
+  editedAt         DateTime? @map("edited_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedByActorId String?  @map("deleted_by_actor_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  campaign         Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  author           Actor    @relation("CampaignCommentAuthor", fields: [authorActorId], references: [id], onDelete: Restrict)
+  deletedBy        Actor?   @relation("CampaignCommentDeletedBy", fields: [deletedByActorId], references: [id], onDelete: Restrict)
+  parent           CampaignComment? @relation("CampaignCommentReplies", fields: [parentCommentId], references: [id], onDelete: Restrict)
+  replies          CampaignComment[] @relation("CampaignCommentReplies")
+  replyTo          CampaignComment? @relation("CampaignCommentReplyTargets", fields: [replyToCommentId], references: [id], onDelete: Restrict)
+  replyTargets     CampaignComment[] @relation("CampaignCommentReplyTargets")
+  reactions        CampaignCommentReaction[]
+
+  @@index([campaignId, parentCommentId, createdAt])
+  @@index([authorActorId, createdAt])
+  @@index([deletedAt])
+  @@map("campaign_comments")
+}
+
+model CampaignCommentReaction {
+  id        String                      @id @default(uuid()) @db.Uuid
+  commentId String                      @map("comment_id") @db.Uuid
+  actorId   String                      @map("actor_id") @db.Uuid
+  type      CampaignCommentReactionType
+  createdAt DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  comment   CampaignComment             @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  actor     Actor                       @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([commentId, actorId])
+  @@index([actorId, updatedAt])
+  @@map("campaign_comment_reactions")
+}
+
+model MaterialRecord {
+  bookings BookingRecord[]
+  comments MaterialComment[]
+  id            String   @id @default(uuid()) @db.Uuid
+  materialId    String   @unique @map("material_id")
+  data          Json
+  recordVersion Int      @default(1) @map("record_version")
+  isDeleted     Boolean  @default(false) @map("is_deleted")
+  createdBy     String   @map("created_by")
+  updatedBy     String   @map("updated_by")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([isDeleted, updatedAt])
+  @@map("material_records")
+}
+
+model MaterialComment {
+  id            String   @id @default(uuid()) @db.Uuid
+  materialId    String   @map("material_id")
+  authorActorId String   @map("author_actor_id") @db.Uuid
+  body          String
+  parentId      String?  @map("parent_id") @db.Uuid
+  recordVersion Int      @default(1) @map("record_version")
+  editedAt      DateTime? @map("edited_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  material      MaterialRecord @relation(fields: [materialId], references: [materialId], onDelete: Restrict)
+  author        Actor @relation(fields: [authorActorId], references: [id], onDelete: Restrict)
+  parent        MaterialComment? @relation("MaterialCommentReplies", fields: [parentId], references: [id], onDelete: Restrict)
+  replies       MaterialComment[] @relation("MaterialCommentReplies")
+
+  @@index([materialId, createdAt])
+  @@index([parentId])
+  @@map("material_comments")
+}
+
+model MaterialPortalReference {
+  type      String
+  key       String
+  data      Json
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([type, key])
+  @@index([type])
+  @@map("material_portal_references")
+}
+
+model GoogleOAuthConnection {
+  actorId              String   @id @map("actor_id") @db.Uuid
+  providerAccountId    String   @map("provider_account_id")
+  accountEmail         String   @map("account_email")
+  accountName          String?  @map("account_name")
+  encryptedTokens      String   @map("encrypted_tokens")
+  grantedScopes        String[] @map("granted_scopes")
+  accessTokenExpiresAt DateTime? @map("access_token_expires_at") @db.Timestamptz(3)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  actor                Actor    @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@unique([providerAccountId])
+  @@map("google_oauth_connections")
+}
+
+model GoogleOAuthState {
+  stateHash String   @id @map("state_hash")
+  actorId   String   @map("actor_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  actor     Actor    @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([actorId, expiresAt])
+  @@map("google_oauth_states")
+}
+
+model GoogleDriveIntegrationConnection {
+  key                  String   @id
+  providerAccountId    String   @map("provider_account_id")
+  accountEmail         String   @map("account_email")
+  accountName          String?  @map("account_name")
+  encryptedTokens      String   @map("encrypted_tokens")
+  grantedScopes        String[] @map("granted_scopes")
+  accessTokenExpiresAt DateTime? @map("access_token_expires_at") @db.Timestamptz(3)
+  connectedByActorId   String   @map("connected_by_actor_id") @db.Uuid
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  connectedByActor     Actor    @relation(fields: [connectedByActorId], references: [id], onDelete: Restrict)
+
+  @@map("google_drive_integration_connections")
+}
+
+model SpreadsheetExchangeOperation {
+  id             String   @id @default(uuid()) @db.Uuid
+  actorId        String   @map("actor_id") @db.Uuid
+  idempotencyKey String   @map("idempotency_key")
+  kind           String
+  spreadsheetId  String   @map("spreadsheet_id")
+  sourceSheetId  String?  @map("source_sheet_id")
+  targetSheetId  String?  @map("target_sheet_id")
+  targetSheetName String? @map("target_sheet_name")
+  resultUrl      String?  @map("result_url")
+  status         String
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  actor          Actor    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([actorId, idempotencyKey])
+  @@index([spreadsheetId, createdAt])
+  @@map("spreadsheet_exchange_operations")
+}
+
+model EmploymentOrgUnit {
+  qcttPlanItems QcttPlanItem[]
+  id String @id @default(uuid()) @db.Uuid
+  identityKey String @unique @map("identity_key")
+  sourceName String @map("source_name")
+  kind String
+  parentId String? @map("parent_id") @db.Uuid
+  parent EmploymentOrgUnit? @relation("EmploymentTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children EmploymentOrgUnit[] @relation("EmploymentTree")
+  departments EmploymentMembership[] @relation("EmploymentDepartment")
+  divisions EmploymentMembership[] @relation("EmploymentDivision")
+  roleBindings ScopedRoleBinding[]
+  permissionOverrides AccountPermissionOverride[] @relation("OverrideScopeOrg")
+  relationOverrides AccountPermissionOverride[] @relation("OverrideRelationOrg")
+  campaignParticipants CampaignParticipant[]
+  requestedDepartmentCampaigns Campaign[] @relation("CampaignRequestingDepartment")
+  requestedDivisionCampaigns Campaign[] @relation("CampaignRequestingDivision")
+  workflowPolicyStates WorkflowPolicyState[]
+  workflowDepartmentRevisions CampaignWorkflowRevision[] @relation("WorkflowReceivingDepartment")
+  workflowDivisionRevisions CampaignWorkflowRevision[] @relation("WorkflowReceivingDivision")
+  workflowSteps CampaignWorkflowStep[]
+  workflowDecisions CampaignWorkflowDecision[]
+  workflowAssignments CampaignWorkflowAssignment[]
+  sentDivisionCooperations CampaignCooperationRequest[] @relation("CooperationSourceOrg")
+  receivedDivisionCooperations CampaignCooperationRequest[] @relation("CooperationTargetOrg")
+  sourceProvider String @map("source_provider")
+  catalogOrganizationCode String? @map("catalog_organization_code")
+  catalogOrganization OrganizationUnit? @relation(fields: [catalogOrganizationCode], references: [code], onDelete: Restrict)
+  isActive Boolean @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([parentId, kind])
+  @@map("employment_org_units")
+}
+
+model EmploymentMembership {
+  actorId String @id @map("actor_id") @db.Uuid
+  departmentId String @map("department_id") @db.Uuid
+  divisionId String? @map("division_id") @db.Uuid
+  displayGroup String? @map("display_group")
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  department EmploymentOrgUnit @relation("EmploymentDepartment", fields: [departmentId], references: [id], onDelete: Restrict)
+  division EmploymentOrgUnit? @relation("EmploymentDivision", fields: [divisionId], references: [id], onDelete: Restrict)
+  recordVersion Int @default(1) @map("record_version")
+  @@index([departmentId, divisionId])
+  @@map("employment_memberships")
+}
+
+model LocalCredential {
+  actorId String @id @map("actor_id") @db.Uuid
+  passwordHash String @map("password_hash")
+  mustChangePassword Boolean @default(true) @map("must_change_password")
+  credentialVersion Int @default(1) @map("credential_version")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@map("local_credentials")
+}
+
+model LocalSession {
+  id String @id @default(uuid()) @db.Uuid
+  tokenHash String @unique @map("token_hash")
+  csrfHash String @map("csrf_hash")
+  originalActorId String @map("original_actor_id") @db.Uuid
+  effectiveActorId String @map("effective_actor_id") @db.Uuid
+  originalActor Actor @relation("SessionOriginalActor", fields: [originalActorId], references: [id], onDelete: Restrict)
+  effectiveActor Actor @relation("SessionEffectiveActor", fields: [effectiveActorId], references: [id], onDelete: Restrict)
+  credentialVersion Int @map("credential_version")
+  mode String @default("DIRECT")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  @@index([originalActorId, revokedAt])
+  @@index([effectiveActorId, revokedAt])
+  @@index([expiresAt])
+  @@map("local_sessions")
+}
+
+model LocalLoginBucket {
+  keyHash String @id @map("key_hash")
+  attempts Int @default(0)
+  windowStartedAt DateTime @map("window_started_at") @db.Timestamptz(3)
+  @@map("local_login_buckets")
+}
+
+model PendingDirectoryContact {
+  email String @id
+  sourceSheet String @map("source_sheet")
+  sourceRow Int @map("source_row")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@map("pending_directory_contacts")
+}
+
+model IdentityImportState {
+  key String @id
+  recordVersion Int @default(1) @map("record_version")
+  bootstrappedAt DateTime? @map("bootstrapped_at") @db.Timestamptz(3)
+  sourceHash String? @map("source_hash")
+  @@map("identity_import_state")
+}
+
+model ScopedRoleBinding {
+  id String @id @default(uuid()) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  roleCode String @map("role_code")
+  scopeKey String @map("scope_key")
+  scopeType String @map("scope_type")
+  module String?
+  orgId String? @map("org_id") @db.Uuid
+  campaignId String? @map("campaign_id") @db.Uuid
+  relation String @default("PRESET")
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(3)
+  recordVersion Int @default(1) @map("record_version")
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  role Role @relation(fields: [roleCode], references: [code], onDelete: Restrict)
+  organization EmploymentOrgUnit? @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@unique([actorId, roleCode, scopeKey])
+  @@index([actorId, module])
+  @@index([campaignId])
+  @@index([orgId])
+  @@map("scoped_role_bindings")
+}
+
+model PermissionDefinition {
+  code String @id
+  label String
+  module String
+  groupLabel String @map("group_label")
+  description String
+  supportedScopes String[] @map("supported_scopes")
+  implementationStatus String @default("RESERVED") @map("implementation_status")
+  rolePresets RolePermission[]
+  overrides AccountPermissionOverride[]
+  @@map("permission_definitions")
+}
+
+model RolePermission {
+  id String @id @default(uuid()) @db.Uuid
+  roleCode String @map("role_code")
+  permissionCode String @map("permission_code")
+  effect String @default("ALLOW")
+  relation String
+  defaultScope String @default("MODULE") @map("default_scope")
+  role Role @relation(fields: [roleCode], references: [code], onDelete: Restrict)
+  permission PermissionDefinition @relation(fields: [permissionCode], references: [code], onDelete: Restrict)
+  @@unique([roleCode, permissionCode, relation])
+  @@map("role_permissions")
+}
+
+model AccountPermissionOverride {
+  id String @id @default(uuid()) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  permissionCode String @map("permission_code")
+  effect String
+  scopeKey String @map("scope_key")
+  scopeType String @map("scope_type")
+  module String?
+  orgId String? @map("org_id") @db.Uuid
+  campaignId String? @map("campaign_id") @db.Uuid
+  fieldKey String? @map("field_key")
+  relation String @default("ALL")
+  relationOrgId String? @map("relation_org_id") @db.Uuid
+  validFrom DateTime? @map("valid_from") @db.Timestamptz(3)
+  validUntil DateTime? @map("valid_until") @db.Timestamptz(3)
+  recordVersion Int @default(1) @map("record_version")
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  permission PermissionDefinition @relation(fields: [permissionCode], references: [code], onDelete: Restrict)
+  organization EmploymentOrgUnit? @relation("OverrideScopeOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  relationOrganization EmploymentOrgUnit? @relation("OverrideRelationOrg", fields: [relationOrgId], references: [id], onDelete: Restrict)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  @@unique([actorId, permissionCode, scopeKey])
+  @@index([actorId, module])
+  @@index([campaignId, fieldKey])
+  @@map("account_permission_overrides")
+}
+
+model AccessPolicyState {
+  key String @id
+  recordVersion Int @default(1) @map("record_version")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@map("access_policy_state")
+}
+
+model CampaignParticipant {
+  id String @id @default(uuid()) @db.Uuid
+  campaignId String @map("campaign_id") @db.Uuid
+  actorId String? @map("actor_id") @db.Uuid
+  orgId String? @map("org_id") @db.Uuid
+  functionalRole String @map("functional_role")
+  responsibility String
+  assignedByActorId String @map("assigned_by_actor_id") @db.Uuid
+  startsAt DateTime @default(now()) @map("starts_at") @db.Timestamptz(3)
+  endsAt DateTime? @map("ends_at") @db.Timestamptz(3)
+  recordVersion Int @default(1) @map("record_version")
+  workflowAssignmentId String? @unique @map("workflow_assignment_id") @db.Uuid
+  workflowAssignment CampaignWorkflowAssignment? @relation(fields: [workflowAssignmentId], references: [id], onDelete: Restrict)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  actor Actor? @relation("CampaignParticipantActor", fields: [actorId], references: [id], onDelete: Restrict)
+  organization EmploymentOrgUnit? @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  assignedBy Actor @relation("CampaignParticipantAssigner", fields: [assignedByActorId], references: [id], onDelete: Restrict)
+  @@index([campaignId, endsAt])
+  @@index([actorId, endsAt])
+  @@index([orgId, endsAt])
+  @@map("campaign_participants")
+}
+
+model WorkflowPolicyState {
+  key String @id
+  recordVersion Int @default(1) @map("record_version")
+  commDepartmentId String? @map("comm_department_id") @db.Uuid
+  communicationDepartment EmploymentOrgUnit? @relation(fields: [commDepartmentId], references: [id], onDelete: Restrict)
+  demoInitializedAt DateTime? @map("demo_initialized_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@map("workflow_policy_state")
+}
+
+// Append-only definitions; an INHERIT version ends a record override without deleting its history.
+model ApprovalPolicyVersion {
+  id String @id @default(uuid()) @db.Uuid
+  version Int @unique
+  scopeKey String @map("scope_key")
+  campaignId String? @map("campaign_id") @db.Uuid
+  preset String?
+  enforcement String?
+  requiredApprovals Json @default("{\"DEPLOY\":true,\"EDIT\":true,\"PAUSE\":true,\"RESUME\":true,\"CANCEL\":true,\"PURGE\":true}") @map("required_approvals")
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  reason String
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  createdBy Actor @relation(fields: [createdByActorId], references: [id], onDelete: Restrict)
+  revisions CampaignWorkflowRevision[]
+  decisions CampaignWorkflowDecision[]
+  @@index([scopeKey, effectiveFrom, version])
+  @@map("approval_policy_versions")
+}
+
+model CampaignWorkflow {
+  id String @id @default(uuid()) @db.Uuid
+  campaignId String @unique @map("campaign_id") @db.Uuid
+  currentRevisionId String? @unique @map("current_revision_id") @db.Uuid
+  recordVersion Int @default(1) @map("record_version")
+  operationalState String @default("ACTIVE") @map("operational_state")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  currentRevision CampaignWorkflowRevision? @relation("CurrentWorkflowRevision", fields: [currentRevisionId, id], references: [id, workflowId], onDelete: Restrict)
+  revisions CampaignWorkflowRevision[] @relation("WorkflowRevisions")
+  assignments CampaignWorkflowAssignment[]
+  cooperationRequests CampaignCooperationRequest[]
+  changeRequests CampaignChangeRequest[]
+  plans CampaignPlan[]
+  @@unique([currentRevisionId, id])
+  @@map("campaign_workflows")
+}
+
+model CampaignChangeRequest {
+  id String @id @default(uuid()) @db.Uuid
+  workflowId String @map("workflow_id") @db.Uuid
+  /// EDIT, PAUSE, CANCEL, PLAN, RESUME, RESTORE, PURGE; constrained by migration SQL.
+  kind String
+  state String @default("PENDING")
+  subjectRevision Int @map("subject_revision")
+  campaignRecordVersion Int @map("campaign_record_version")
+  payload Json
+  beforeSnapshot Json @map("before_snapshot")
+  reason String
+  requestedByActorId String @map("requested_by_actor_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  payloadHash String @map("payload_hash")
+  recordVersion Int @default(1) @map("record_version")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decidedByActorId String? @map("decided_by_actor_id") @db.Uuid
+  decisionReason String? @map("decision_reason")
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(3)
+  workflow CampaignWorkflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  requester Actor @relation("CampaignChangeRequester", fields: [requestedByActorId], references: [id], onDelete: Restrict)
+  decider Actor? @relation("CampaignChangeDecider", fields: [decidedByActorId], references: [id], onDelete: Restrict)
+  @@unique([requestedByActorId, idempotencyKey])
+  @@index([workflowId, state])
+  @@map("campaign_change_requests")
+}
+
+model CampaignPlan {
+  id String @id @default(uuid()) @db.Uuid
+  workflowId String @map("workflow_id") @db.Uuid
+  number Int
+  subjectRevision Int @map("subject_revision")
+  title String
+  objective String
+  tasks Json
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  workflow CampaignWorkflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  creator Actor @relation(fields: [createdByActorId], references: [id], onDelete: Restrict)
+  @@unique([workflowId, number])
+  @@map("campaign_plans")
+}
+
+model CampaignWorkflowRevision {
+  id String @id @default(uuid()) @db.Uuid
+  workflowId String @map("workflow_id") @db.Uuid
+  number Int
+  subjectRevision Int @map("subject_revision")
+  subjectSnapshot Json @map("subject_snapshot")
+  policyVersionId String @map("policy_version_id") @db.Uuid
+  policySource String @map("policy_source")
+  route String?
+  state String
+  scopeRevision Int @default(1) @map("scope_revision")
+  receivingDepartmentId String? @map("receiving_department_id") @db.Uuid
+  receivingDivisionId String? @map("receiving_division_id") @db.Uuid
+  submittedByActorId String @map("submitted_by_actor_id") @db.Uuid
+  reason String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  closedAt DateTime? @map("closed_at") @db.Timestamptz(3)
+  workflow CampaignWorkflow @relation("WorkflowRevisions", fields: [workflowId], references: [id], onDelete: Restrict)
+  currentFor CampaignWorkflow? @relation("CurrentWorkflowRevision")
+  policy ApprovalPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  receivingDepartment EmploymentOrgUnit? @relation("WorkflowReceivingDepartment", fields: [receivingDepartmentId], references: [id], onDelete: Restrict)
+  receivingDivision EmploymentOrgUnit? @relation("WorkflowReceivingDivision", fields: [receivingDivisionId], references: [id], onDelete: Restrict)
+  submittedBy Actor @relation(fields: [submittedByActorId], references: [id], onDelete: Restrict)
+  steps CampaignWorkflowStep[]
+  assignments CampaignWorkflowAssignment[]
+  cooperationRequests CampaignCooperationRequest[]
+  @@unique([workflowId, number])
+  @@unique([id, workflowId])
+  @@index([state])
+  @@map("campaign_workflow_revisions")
+}
+
+model CampaignWorkflowStep {
+  id String @id @default(uuid()) @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  kind String
+  orgId String @map("org_id") @db.Uuid
+  assigneeActorId String? @map("assignee_actor_id") @db.Uuid
+  pool String @default("ANY_ONE")
+  mandatory Boolean @default(true)
+  state String @default("PENDING")
+  stepVersion Int @default(1) @map("step_version")
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  revision CampaignWorkflowRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  organization EmploymentOrgUnit @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  assignee Actor? @relation("WorkflowStepAssignee", fields: [assigneeActorId], references: [id], onDelete: Restrict)
+  createdBy Actor @relation("WorkflowStepCreator", fields: [createdByActorId], references: [id], onDelete: Restrict)
+  decision CampaignWorkflowDecision?
+  @@unique([revisionId, kind, orgId])
+  @@index([state, orgId, assigneeActorId])
+  @@map("campaign_workflow_steps")
+}
+
+model CampaignWorkflowCommand {
+  id String @id @default(uuid()) @db.Uuid
+  campaignId String @map("campaign_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  originalActorId String @map("original_actor_id") @db.Uuid
+  contextMode String @map("context_mode")
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  operation String
+  payloadHash String @map("payload_hash")
+  result Json @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  actor Actor @relation("WorkflowCommandActor", fields: [actorId], references: [id], onDelete: Restrict)
+  originalActor Actor @relation("WorkflowCommandOriginal", fields: [originalActorId], references: [id], onDelete: Restrict)
+  decisions CampaignWorkflowDecision[]
+  assignments CampaignWorkflowAssignment[]
+  requestedCooperation CampaignCooperationRequest? @relation("CooperationRequestCommand")
+  respondedCooperation CampaignCooperationRequest[] @relation("CooperationResponseCommand")
+  @@unique([actorId, idempotencyKey])
+  @@map("campaign_workflow_commands")
+}
+
+model CampaignWorkflowDecision {
+  id String @id @default(uuid()) @db.Uuid
+  stepId String @unique @map("step_id") @db.Uuid
+  commandId String @map("command_id") @db.Uuid
+  subjectRevision Int @map("subject_revision")
+  policyVersionId String @map("policy_version_id") @db.Uuid
+  stepVersion Int @map("step_version")
+  actorId String @map("actor_id") @db.Uuid
+  originalActorId String @map("original_actor_id") @db.Uuid
+  orgId String @map("org_id") @db.Uuid
+  kind String
+  /// Empty is valid for approval/rejection; RETURNED and SKIPPED_BY_ADMIN still require a reason (SQL CHECK).
+  reason String
+  decidedAt DateTime @default(now()) @map("decided_at") @db.Timestamptz(3)
+  step CampaignWorkflowStep @relation(fields: [stepId], references: [id], onDelete: Restrict)
+  command CampaignWorkflowCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  policy ApprovalPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  actor Actor @relation("WorkflowDecisionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  originalActor Actor @relation("WorkflowDecisionOriginal", fields: [originalActorId], references: [id], onDelete: Restrict)
+  organization EmploymentOrgUnit @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  assignments CampaignWorkflowAssignment[]
+  @@map("campaign_workflow_decisions")
+}
+
+model CampaignWorkflowAssignment {
+  id String @id @default(uuid()) @db.Uuid
+  workflowId String @map("workflow_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  orgId String @map("org_id") @db.Uuid
+  functionalRole String @map("functional_role")
+  responsibility String
+  assignedByActorId String @map("assigned_by_actor_id") @db.Uuid
+  commandId String @map("command_id") @db.Uuid
+  decisionId String? @map("decision_id") @db.Uuid
+  startsAt DateTime @default(now()) @map("starts_at") @db.Timestamptz(3)
+  endsAt DateTime? @map("ends_at") @db.Timestamptz(3)
+  recordVersion Int @default(1) @map("record_version")
+  workflow CampaignWorkflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  revision CampaignWorkflowRevision @relation(fields: [revisionId, workflowId], references: [id, workflowId], onDelete: Restrict)
+  actor Actor @relation("WorkflowAssignmentActor", fields: [actorId], references: [id], onDelete: Restrict)
+  organization EmploymentOrgUnit @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  assignedBy Actor @relation("WorkflowAssignmentAssigner", fields: [assignedByActorId], references: [id], onDelete: Restrict)
+  command CampaignWorkflowCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  decision CampaignWorkflowDecision? @relation(fields: [decisionId], references: [id], onDelete: Restrict)
+  participant CampaignParticipant?
+  @@index([workflowId, endsAt])
+  @@index([actorId, endsAt])
+  @@map("campaign_workflow_assignments")
+}
+
+model CampaignCooperationRequest {
+  id String @id @default(uuid()) @db.Uuid
+  workflowId String @map("workflow_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  sourceOrgId String @map("source_org_id") @db.Uuid
+  targetOrgId String @map("target_org_id") @db.Uuid
+  targetActorId String? @map("target_actor_id") @db.Uuid
+  requestedByActorId String @map("requested_by_actor_id") @db.Uuid
+  respondedByActorId String? @map("responded_by_actor_id") @db.Uuid
+  commandId String @unique @map("command_id") @db.Uuid
+  responseCommandId String? @map("response_command_id") @db.Uuid
+  state String @default("PENDING")
+  recordVersion Int @default(1) @map("record_version")
+  reason String
+  responseReason String? @map("response_reason")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(3)
+  respondedAt DateTime? @map("responded_at") @db.Timestamptz(3)
+  workflow CampaignWorkflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  revision CampaignWorkflowRevision @relation(fields: [revisionId, workflowId], references: [id, workflowId], onDelete: Restrict)
+  sourceOrganization EmploymentOrgUnit @relation("CooperationSourceOrg", fields: [sourceOrgId], references: [id], onDelete: Restrict)
+  targetOrganization EmploymentOrgUnit @relation("CooperationTargetOrg", fields: [targetOrgId], references: [id], onDelete: Restrict)
+  requestedBy Actor @relation("CooperationRequester", fields: [requestedByActorId], references: [id], onDelete: Restrict)
+  targetActor Actor? @relation("CooperationTarget", fields: [targetActorId], references: [id], onDelete: Restrict)
+  respondedBy Actor? @relation("CooperationResponder", fields: [respondedByActorId], references: [id], onDelete: Restrict)
+  command CampaignWorkflowCommand @relation("CooperationRequestCommand", fields: [commandId], references: [id], onDelete: Restrict)
+  responseCommand CampaignWorkflowCommand? @relation("CooperationResponseCommand", fields: [responseCommandId], references: [id], onDelete: Restrict)
+  @@index([targetOrgId, state])
+  @@index([workflowId, state])
+  @@index([responseCommandId])
+  @@map("campaign_cooperation_requests")
+}
+model SupplyChannelCatalog {
+  id String @id
+  data Json
+  digest String
+  recordVersion Int @default(1)
+  updatedByActorId String
+  updatedAt DateTime @default(now())
+
+  @@map("supply_channel_catalogs")
+}
+
+model QcttCatalogEntry {
+  code String @id
+  kind String
+  name String
+  status String @default("ACTIVE")
+  layerCode String? @map("layer_code")
+  channelCode String? @map("channel_code")
+  parentCode String? @map("parent_code")
+  layer QcttCatalogEntry? @relation("QcttCatalogLayer", fields: [layerCode], references: [code], onDelete: Restrict)
+  layerActivities QcttCatalogEntry[] @relation("QcttCatalogLayer")
+  channel QcttCatalogEntry? @relation("QcttCatalogChannel", fields: [channelCode], references: [code], onDelete: Restrict)
+  channelActivities QcttCatalogEntry[] @relation("QcttCatalogChannel")
+  parent QcttCatalogEntry? @relation("QcttCatalogTopic", fields: [parentCode], references: [code], onDelete: Restrict)
+  children QcttCatalogEntry[] @relation("QcttCatalogTopic")
+  ownerOrgId String? @map("owner_org_id") @db.Uuid
+  ownerOrgName String @default("") @map("owner_org_name")
+  supplyType String? @map("supply_type")
+  year Int?
+  effectiveFrom DateTime? @map("effective_from") @db.Date
+  effectiveTo DateTime? @map("effective_to") @db.Date
+  sortOrder Int @default(0) @map("sort_order")
+  description String @default("")
+  unit String @default("")
+  note String @default("")
+  source Json @default("{}")
+  recordVersion Int @default(1) @map("record_version")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+  @@index([kind, status, deletedAt, sortOrder])
+  @@map("qctt_catalog_entries")
+}
+
+model QcttCatalogState {
+  key String @id
+  recordVersion Int @default(1) @map("record_version")
+  @@map("qctt_catalog_state")
+}
+
+model QcttCatalogRevision {
+  id String @id @default(uuid()) @db.Uuid
+  code String
+  version Int
+  actorId String @map("actor_id") @db.Uuid
+  action String
+  data Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@unique([code, version])
+  @@map("qctt_catalog_revisions")
+}
+
+model QcttCatalogReservedCode {
+  code String @id
+  kind String
+  @@map("qctt_catalog_reserved_codes")
+}
+
+model QcttCatalogCommand {
+  id String @id @default(uuid()) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  key String
+  digest String
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@unique([actorId, key])
+  @@map("qctt_catalog_commands")
+}
+
+// Owned activity uniqueness is enforced by the partial expression index in the migration.
+model SupplyContract {
+  supplierId String? @map("supplier_id") @db.Uuid
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplierSnapshot Json? @map("supplier_snapshot") @db.JsonB
+  responsibilitySnapshot Json? @map("responsibility_snapshot") @db.JsonB
+  itemTerms SupplyItemTerm[]
+  vendorCode String? @map("vendor_code")
+  codeLocked Boolean @default(false) @map("code_locked")
+  leaderActorId String? @map("leader_actor_id") @db.Uuid
+  vendorActorId String? @map("vendor_actor_id") @db.Uuid
+  currentRevisionId String? @map("current_revision_id") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  currentRevision SupplyContractRevision? @relation("CurrentContractRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict)
+  revisions SupplyContractRevision[] @relation("ContractRevisions")
+  changeRequests SupplyContractChangeRequest[]
+  pivotViews SupplyPivotView[]
+  bookings BookingRecord[]
+  bookingTemplates BookingReportTemplate[]
+  id String @id @default(uuid()) @db.Uuid
+  code String @unique
+  number String?
+  name String
+  vendor String?
+  serviceRecipient String? @map("service_recipient")
+  marketScope String @default("UNSPECIFIED") @map("market_scope")
+  marketCodes Json @default("[]") @map("market_codes")
+  supplyType String @default("PAID")
+  ownerUnitCode String? @map("owner_unit_code")
+  ownerDepartment String? @map("owner_department")
+  managerActorId String? @map("manager_actor_id") @db.Uuid
+  managerEmail String? @map("manager_email")
+  startDate DateTime? @map("start_date") @db.Date
+  endDate DateTime? @map("end_date") @db.Date
+  currency String @default("VND")
+  signedAmount Decimal? @map("signed_amount") @db.Decimal(28, 6)
+  signedVat Decimal? @map("signed_vat") @db.Decimal(28, 6)
+  signedGross Decimal? @map("signed_gross") @db.Decimal(28, 6)
+  status String @default("DRAFT")
+  dossierUrl String? @map("dossier_url")
+  source Json @default("{}")
+  quality Json @default("[]")
+  recordVersion Int @default(1) @map("record_version")
+  localRevision Int @default(0) @map("local_revision")
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  ownerUnit OrganizationUnit? @relation(fields: [ownerUnitCode], references: [code], onDelete: Restrict)
+  manager Actor? @relation("SupplyManager", fields: [managerActorId], references: [id], onDelete: Restrict)
+  aliases SupplyContractAlias[]
+  slots SupplySlot[]
+  periods SupplyPeriod[]
+  plans SupplyAllocationPlan[]
+  allocations SupplyAllocation[]
+  adjustments SupplyAdjustmentGroup[]
+  financialLines SupplyFinancialLine[]
+  imports SupplyImport[]
+  legalRevisions SupplyLegalRevision[]
+  @@index([status, startDate, endDate])
+  @@map("supply_contracts")
+}
+
+model SupplyContractRevision {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  version Int
+  snapshot Json @db.JsonB
+  provenance String @default("PUBLISHED")
+  reason String
+  evidence String?
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  approvedByActorId String? @map("approved_by_actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  contract SupplyContract @relation("ContractRevisions", fields: [contractId], references: [id], onDelete: Restrict)
+  currentFor SupplyContract[] @relation("CurrentContractRevision")
+  bookings BookingRecord[]
+  @@unique([contractId, version])
+  @@map("supply_contract_revisions")
+}
+
+model SupplyContractChangeRequest {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  kind String
+  state String @default("DRAFT")
+  fields Json @db.JsonB
+  reason String
+  evidence String?
+  baseVersion Int @map("base_version")
+  baseRevisionId String? @map("base_revision_id") @db.Uuid
+  recordVersion Int @default(1) @map("record_version")
+  requesterActorId String @map("requester_actor_id") @db.Uuid
+  leaderActorId String? @map("leader_actor_id") @db.Uuid
+  policyVersion Int @map("policy_version")
+  approvalRequired Boolean @map("approval_required")
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(3)
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(3)
+  decidedByActorId String? @map("decided_by_actor_id") @db.Uuid
+  decisionReason String? @map("decision_reason")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  @@index([contractId, state])
+  @@index([leaderActorId, state])
+  @@map("supply_contract_change_requests")
+}
+
+model SupplyContractPolicy {
+  version Int @id
+  required Boolean @default(true)
+  reason String
+  actorId String? @map("actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@map("supply_contract_policies")
+}
+
+model SupplyPivotView {
+  id String @id @default(uuid()) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  name String @db.VarChar(100)
+  definition Json
+  isDefault Boolean @default(false) @map("is_default")
+  recordVersion Int @default(1) @map("record_version")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  @@unique([actorId, contractId, name])
+  @@index([contractId, actorId])
+  @@map("supply_pivot_views")
+}
+
+model SupplyContractAlias {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  provider String
+  sourceId String @map("source_id")
+  alias String
+  evidence Json
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  @@unique([provider, sourceId, alias])
+  @@map("supply_contract_aliases")
+}
+
+model SupplySlot {
+  effectiveTotalQty Decimal? @map("effective_total_qty") @db.Decimal(28, 10)
+  itemTerms SupplyItemTerm[]
+  bookings BookingRecord[]
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  code String @unique
+  name String
+  unit String?
+  quantityUnit String? @map("quantity_unit")
+  priceBasis Decimal? @map("price_basis") @db.Decimal(28, 10)
+  unitPrice Decimal? @map("unit_price") @db.Decimal(28, 6)
+  totalQty Decimal? @map("total_qty") @db.Decimal(28, 10)
+  signedAmount Decimal? @map("signed_amount") @db.Decimal(28, 6)
+  costType String @default("UNKNOWN") @map("cost_type")
+  businessType String @default("UNKNOWN") @map("business_type")
+  channel String?
+  specificChannel String? @map("specific_channel")
+  marketCode String? @map("market_code")
+  description String?
+  materialRequirement String? @map("material_requirement")
+  previewUrl String? @map("preview_url")
+  managerEmail String? @map("manager_email")
+  startDate DateTime? @map("start_date") @db.Date
+  endDate DateTime? @map("end_date") @db.Date
+  status String @default("DRAFT")
+  capacityMode String @default("UNKNOWN") @map("capacity_mode")
+  capacity Int?
+  source Json @default("{}")
+  quality Json @default("[]")
+  recordVersion Int @default(1) @map("record_version")
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  market Market? @relation(fields: [marketCode], references: [code], onDelete: Restrict)
+  bookers SupplySlotBooker[]
+  allocations SupplyAllocation[]
+  financialMaps SupplySlotFinancialMap[]
+  @@index([contractId, status])
+  @@map("supply_slots")
+}
+
+model SupplySlotBooker {
+  id String @id @default(uuid()) @db.Uuid
+  slotId String @map("slot_id") @db.Uuid
+  email String
+  personnelCode String? @map("personnel_code")
+  slot SupplySlot @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  personnel PersonnelDirectoryEntry? @relation(fields: [personnelCode], references: [employeeCode], onDelete: Restrict)
+  @@unique([slotId, email])
+  @@map("supply_slot_bookers")
+}
+
+model SupplyPeriod {
+  itemTerms SupplyItemTerm[]
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  code String
+  name String
+  kind String @default("CUSTOM")
+  startDate DateTime @map("start_date") @db.Date
+  endDate DateTime @map("end_date") @db.Date
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  allocations SupplyAllocation[]
+  @@unique([contractId, code])
+  @@map("supply_periods")
+}
+
+model SupplyAllocationPlan {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  version Int
+  name String
+  status String @default("DRAFT")
+  effectiveFrom DateTime? @map("effective_from") @db.Date
+  source Json @default("{}")
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  allocations SupplyAllocation[]
+  @@unique([contractId, version])
+  @@map("supply_allocation_plans")
+}
+
+model SupplyAllocation {
+  // Period replacements preserve the original baseline as reference history.
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz(3)
+  splitFromId String? @map("split_from_id") @db.Uuid
+  splitFrom SupplyAllocation? @relation("AllocationSplit", fields: [splitFromId], references: [id], onDelete: Restrict)
+  splitParts SupplyAllocation[] @relation("AllocationSplit")
+  bookings BookingRecord[]
+  bookingAccess BookingAllocationAccess?
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  planId String @map("plan_id") @db.Uuid
+  slotId String? @map("slot_id") @db.Uuid
+  periodId String @map("period_id") @db.Uuid
+  sourceKey String? @map("source_key")
+  beneficiaryUnitCode String? @map("beneficiary_unit_code")
+  beneficiaryLabel String @map("beneficiary_label")
+  scopeKind String @default("ENTITLEMENT") @map("scope_kind")
+  limitMode String @default("HARD_LIMIT") @map("limit_mode")
+  baselineQty Decimal? @map("baseline_qty") @db.Decimal(28, 10)
+  baselineAmount Decimal? @map("baseline_amount") @db.Decimal(28, 6)
+  unitPrice Decimal? @map("unit_price") @db.Decimal(28, 6)
+  inputBasis String @default("SOURCE") @map("input_basis")
+  percent Decimal? @db.Decimal(18, 10)
+  denominator Decimal? @db.Decimal(28, 10)
+  taxRate Decimal? @map("tax_rate") @db.Decimal(10, 8)
+  vatEstimated Boolean @default(false) @map("vat_estimated")
+  sourceMonthCount Int? @map("source_month_count")
+  status String @default("DRAFT")
+  sourceVersion String? @map("source_version")
+  source Json @default("{}")
+  quality Json @default("[]")
+  recordVersion Int @default(1) @map("record_version")
+  approvedByActorId String? @map("approved_by_actor_id") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(3)
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  plan SupplyAllocationPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  slot SupplySlot? @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  period SupplyPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  beneficiary OrganizationUnit? @relation(fields: [beneficiaryUnitCode], references: [code], onDelete: Restrict)
+  adjustments SupplyAdjustmentLine[]
+  @@unique([contractId, sourceKey])
+  @@index([contractId, periodId, beneficiaryUnitCode, status])
+  @@index([splitFromId])
+  @@map("supply_allocations")
+}
+
+model BookingRecord {
+  planItemId String? @map("plan_item_id") @db.Uuid
+  planItem QcttPlanItem? @relation(fields: [planItemId], references: [id], onDelete: Restrict)
+  lifecycleRequest Json? @map("lifecycle_request") @db.JsonB
+  contractRevisionId String? @map("contract_revision_id") @db.Uuid
+  contractSnapshot Json? @map("contract_snapshot") @db.JsonB
+  contractRevision SupplyContractRevision? @relation(fields: [contractRevisionId], references: [id], onDelete: Restrict)
+  workflow Json? @db.JsonB
+  execution String @default("NOT_STARTED")
+  reportPeriods Json @default("[]") @map("report_periods") @db.JsonB
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  slotId String @map("slot_id") @db.Uuid
+  allocationId String @map("allocation_id") @db.Uuid
+  campaignId String? @map("campaign_id") @db.Uuid
+  campaignLabel String @map("campaign_label")
+  startDate DateTime @map("start_date") @db.Date
+  endDate DateTime @map("end_date") @db.Date
+  overallStartDate DateTime? @map("overall_start_date") @db.Date
+  overallEndDate DateTime? @map("overall_end_date") @db.Date
+  campaignDatesAuto Boolean @default(false) @map("campaign_dates_auto")
+  timeDistribution Json @default("{\"version\":1,\"mode\":\"AUTO\",\"segments\":[],\"fillRemainder\":true}") @map("time_distribution")
+  quantity Decimal @db.Decimal(28, 10)
+  unit String
+  unitPrice Decimal @map("unit_price") @db.Decimal(28, 6)
+  priceBasis Decimal @map("price_basis") @db.Decimal(28, 10)
+  taxRate Decimal @map("tax_rate") @db.Decimal(10, 8)
+  amount Decimal @db.Decimal(28, 6)
+  vat Decimal @db.Decimal(28, 6)
+  gross Decimal @db.Decimal(28, 6)
+  state String @default("ACTIVE")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  materialId String? @map("material_id") @db.Uuid
+  materialUrl String? @map("material_url")
+  note String @default("")
+  vendorConfirmedQty Decimal? @map("vendor_confirmed_qty") @db.Decimal(28, 10)
+  sourceApprovedQty Decimal? @map("source_approved_qty") @db.Decimal(28, 10)
+  acceptedQty Decimal @default(0) @map("accepted_qty") @db.Decimal(28, 10)
+  reportState String @default("EMPTY") @map("report_state")
+  reportTemplateId String? @map("report_template_id") @db.Uuid
+  reportData Json @default("{}") @map("report_data")
+  sourceKey String? @unique @map("source_key")
+  source Json @default("{}")
+  recordVersion Int @default(1) @map("record_version")
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  slot SupplySlot @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  allocation SupplyAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  material MaterialRecord? @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  creator Actor @relation(fields: [createdByActorId], references: [id], onDelete: Restrict)
+  reportTemplate BookingReportTemplate? @relation(fields: [reportTemplateId], references: [id], onDelete: Restrict)
+  @@index([contractId, allocationId, deletedAt])
+  @@index([campaignId, startDate])
+  @@index([planItemId])
+  @@index([state, updatedAt])
+  @@map("booking_records")
+}
+
+model QcttPlan {
+  campaignId String @id @map("campaign_id") @db.Uuid
+  recordVersion Int @default(1) @map("record_version")
+  columns Json @default("[]")
+  initializedAt DateTime? @map("initialized_at") @db.Timestamptz(3)
+  initializedByActorId String? @map("initialized_by_actor_id") @db.Uuid
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  initializedBy Actor? @relation("QcttPlanInitializer", fields: [initializedByActorId], references: [id], onDelete: Restrict)
+  items QcttPlanItem[]
+  @@map("qctt_plans")
+}
+
+model QcttPlanItem {
+  customValues Json @default("{}") @map("custom_values")
+  id String @id @default(uuid()) @db.Uuid
+  campaignId String @map("campaign_id") @db.Uuid
+  recordVersion Int @default(1) @map("record_version")
+  sortOrder Int @default(0) @map("sort_order")
+  origin String @default("MANUAL")
+  professionLayer String? @map("profession_layer")
+  channelCode String? @map("channel_code")
+  activityCode String? @map("activity_code")
+  activityLabel String @map("activity_label")
+  content Json?
+  format String?
+  otherFormat String @default("") @map("other_format")
+  startDate DateTime? @map("start_date") @db.Date
+  endDate DateTime? @map("end_date") @db.Date
+  departmentId String? @map("department_id") @db.Uuid
+  requirements String @default("")
+  progress String @default("PLANNED")
+  classification Json?
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  plan QcttPlan @relation(fields: [campaignId], references: [campaignId], onDelete: Restrict)
+  department EmploymentOrgUnit? @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  creator Actor @relation(fields: [createdByActorId], references: [id], onDelete: Restrict)
+  bookings BookingRecord[]
+  revisions QcttPlanItemRevision[]
+  @@index([campaignId, deletedAt, sortOrder])
+  @@map("qctt_plan_items")
+}
+
+model QcttPlanItemRevision {
+  id String @id @default(uuid()) @db.Uuid
+  itemId String @map("item_id") @db.Uuid
+  version Int
+  actorId String @map("actor_id") @db.Uuid
+  action String
+  data Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  item QcttPlanItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@unique([itemId, version])
+  @@map("qctt_plan_item_revisions")
+}
+
+model QcttPlanCommand {
+  id String @id @default(uuid()) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  key String @db.Uuid
+  digest String
+  result Json
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@unique([actorId, key])
+  @@map("qctt_plan_commands")
+}
+
+model BookingAllocationAccess {
+  allocationId String @id @map("allocation_id") @db.Uuid
+  ownerDepartmentId String? @map("owner_department_id") @db.Uuid
+  beneficiaryDepartmentId String? @map("beneficiary_department_id") @db.Uuid
+  leaderActorIds Json @default("[]") @map("leader_actor_ids")
+  operatorActorIds Json @default("[]") @map("operator_actor_ids")
+  beneficiaryActorIds Json @default("[]") @map("beneficiary_actor_ids")
+  vendorActorIds Json @default("[]") @map("vendor_actor_ids")
+  recordVersion Int @default(1) @map("record_version")
+  allocation SupplyAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  @@map("booking_allocation_access")
+}
+
+model BookingReportTemplate {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  version Int
+  name String
+  definition Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  bookings BookingRecord[]
+  @@unique([contractId, version])
+  @@map("booking_report_templates")
+}
+
+model BookingRevision {
+  id String @id @default(uuid()) @db.Uuid
+  bookingId String @map("booking_id") @db.Uuid
+  version Int
+  action String
+  actorId String @map("actor_id") @db.Uuid
+  data Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@unique([bookingId, version])
+  @@map("booking_revisions")
+}
+
+model BookingWorkflowPolicy {
+  version Int @id
+  required Boolean
+  actions Json?
+  actorId String @map("actor_id") @db.Uuid
+  reason String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@map("booking_workflow_policies")
+}
+
+model BookingCommand {
+  key String @id
+  actorId String @map("actor_id") @db.Uuid
+  digest String
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@map("booking_commands")
+}
+
+/// Append-only configuration revisions; old decisions retain their captured grant.
+model BookingApprovalDelegation {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  version Int
+  leaderActorId String @map("leader_actor_id") @db.Uuid
+  delegateActorId String @map("delegate_actor_id") @db.Uuid
+  leaderName String @map("leader_name")
+  delegateName String @map("delegate_name")
+  recipientRole String @map("recipient_role")
+  scope String
+  actions Json
+  startsOn String @map("starts_on") @db.VarChar(10)
+  endsOn String? @map("ends_on") @db.VarChar(10)
+  revoked Boolean @default(false)
+  reason String
+  actorId String @map("actor_id") @db.Uuid
+  actorName String @map("actor_name")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@unique([contractId, delegateActorId, version], map: "booking_delegation_contract_recipient_version_key")
+  @@map("booking_approval_delegations")
+}
+
+model SupplyAdjustmentGroup {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  kind String @default("MIXED")
+  name String
+  reason String
+  evidence String?
+  status String @default("DRAFT")
+  effectiveDate DateTime? @map("effective_date") @db.Date
+  source Json @default("{}")
+  recordVersion Int @default(1) @map("record_version")
+  createdByActorId String @map("created_by_actor_id") @db.Uuid
+  approvedByActorId String? @map("approved_by_actor_id") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(3)
+  reversesId String? @unique @map("reverses_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  reverses SupplyAdjustmentGroup? @relation("SupplyReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversal SupplyAdjustmentGroup? @relation("SupplyReversal")
+  lines SupplyAdjustmentLine[]
+  @@index([contractId, status])
+  @@map("supply_adjustment_groups")
+}
+
+model SupplyAdjustmentLine {
+  id String @id @default(uuid()) @db.Uuid
+  groupId String @map("group_id") @db.Uuid
+  allocationId String @map("allocation_id") @db.Uuid
+  deltaQty Decimal? @map("delta_qty") @db.Decimal(28, 10)
+  deltaAmount Decimal? @map("delta_amount") @db.Decimal(28, 6)
+  expectedAllocationVersion Int @map("expected_allocation_version")
+  source Json @default("{}")
+  group SupplyAdjustmentGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  allocation SupplyAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  @@unique([groupId, allocationId])
+  @@map("supply_adjustment_lines")
+}
+
+model SupplyFinancialLine {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  sourceKey String @map("source_key")
+  externalId String? @map("external_id")
+  itemCode String? @map("item_code")
+  description String?
+  unit String?
+  quantity Decimal? @db.Decimal(28, 10)
+  unitPrice Decimal? @map("unit_price") @db.Decimal(28, 6)
+  amount Decimal? @db.Decimal(28, 6)
+  source Json
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  maps SupplySlotFinancialMap[]
+  @@unique([contractId, sourceKey])
+  @@map("supply_financial_lines")
+}
+
+model SupplySlotFinancialMap {
+  id String @id @default(uuid()) @db.Uuid
+  slotId String @map("slot_id") @db.Uuid
+  lineId String? @map("line_id") @db.Uuid
+  sourceKey String @map("source_key")
+  taxRate Decimal? @map("tax_rate") @db.Decimal(10, 8)
+  periodCode String? @map("period_code")
+  status String
+  source Json
+  slot SupplySlot @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  line SupplyFinancialLine? @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  @@unique([slotId, sourceKey])
+  @@map("supply_slot_financial_maps")
+}
+
+model SupplyImport {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String? @map("contract_id") @db.Uuid
+  sourceId String @map("source_id")
+  digest String
+  actorId String @map("actor_id") @db.Uuid
+  snapshot Json
+  preview Json
+  status String @default("PREVIEW")
+  expectedVersion Int? @map("expected_version")
+  readAt DateTime @map("read_at") @db.Timestamptz(3)
+  appliedAt DateTime? @map("applied_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  contract SupplyContract? @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  @@index([sourceId, digest, status])
+  @@map("supply_imports")
+}
+
+model SupplyCommand {
+  id String @id @default(uuid()) @db.Uuid
+  key String @unique
+  actorId String @map("actor_id") @db.Uuid
+  digest String
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@map("supply_commands")
+}
+
+model SupplyLegalRevision {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  version Int
+  reason String
+  evidence String
+  changes Json
+  actorId String @map("actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  @@unique([contractId, version])
+  @@map("supply_legal_revisions")
+}

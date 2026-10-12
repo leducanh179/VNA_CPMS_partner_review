@@ -1,0 +1,32 @@
+openapi: 3.1.0
+info:
+  title: CPMS Future AI Tool Contracts
+  version: 0.1.0
+  description: Provider-neutral preview contracts. AI_MODE remains OFF and no operation persists data.
+paths:
+  /tools/campaign-intake/preview:
+    post:
+      operationId: previewCampaignIntake
+      summary: Preview structured campaign intake fields
+      description: Returns a proposal for human review. Persistence must occur later through a CPMS Application Service.
+      x-cpms-status: future-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/campaign-intake-tool.schema.json
+      responses:
+        '200':
+          description: A non-persisted proposal requiring human confirmation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposal, requiresHumanConfirmation]
+                properties:
+                  proposal:
+                    type: object
+                    additionalProperties: true
+                  requiresHumanConfirmation:
+                    const: true

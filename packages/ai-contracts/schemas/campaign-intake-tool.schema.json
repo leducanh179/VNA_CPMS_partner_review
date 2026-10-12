@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cpms.local/schemas/campaign-intake-tool.schema.json",
+  "title": "CPMS Campaign Intake Preview Tool",
+  "description": "Provider-neutral, non-persisting contract for future AI-assisted campaign intake.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sourceText", "allowedRequestingUnits"],
+  "properties": {
+    "sourceText": { "type": "string", "minLength": 1, "maxLength": 50000 },
+    "allowedRequestingUnits": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  },
+  "x-cpms-persistence": "none",
+  "x-cpms-human-confirmation-required": true
+}

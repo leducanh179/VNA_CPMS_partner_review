@@ -1,0 +1,42 @@
+{
+  "name": "cpms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Portable Communication Program Management System workspace",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22.12 <25",
+    "pnpm": ">=10 <12"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @cpms/api --filter @cpms/web dev",
+    "lint": "eslint apps packages database --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:packages": "pnpm --filter @cpms/domain build && pnpm --filter @cpms/integrations build && pnpm --filter @cpms/ai-contracts build && pnpm --filter @cpms/ui build",
+    "build:apps": "pnpm --filter @cpms/api build && pnpm --filter @cpms/web build",
+    "build": "pnpm build:packages && pnpm build:apps",
+    "verify": "pnpm db:generate && pnpm lint && pnpm test && pnpm build && pnpm db:validate",
+    "db:generate": "prisma generate --schema database/schema.prisma",
+    "db:validate": "prisma validate --schema database/schema.prisma",
+    "db:migrate:dev": "prisma migrate dev --schema database/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema database/schema.prisma",
+    "db:migrate:reset": "prisma migrate reset --force --schema database/schema.prisma",
+    "db:migration:generate": "prisma migrate diff --from-empty --to-schema-datamodel database/schema.prisma --script --output database/migrations/202608300001_bootstrap/migration.sql",
+    "db:seed": "prisma db seed --schema database/schema.prisma",
+    "db:studio": "prisma studio --schema database/schema.prisma",
+    "campaign:import-sheet": "node scripts/import-campaign-sheet.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@prisma/client": "^6.14.0",
+    "@types/node": "^24.3.0",
+    "dotenv": "17.4.1",
+    "eslint": "^10.8.1",
+    "prisma": "^6.14.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,35 @@
+# Local inputs are never source-controlled.
+/local-source/
+/private-local/
+/.tmp-bootstrap/
+/tmp/
+/_codex_test.txt
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Dependencies and build output
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Runtime data
+backups/*
+!backups/.gitkeep
+*.log
+*.pid
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
