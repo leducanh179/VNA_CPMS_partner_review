@@ -1,8 +1,10 @@
-import type { ActorContext, MaterialFields, MaterialSummary } from '@cpms/domain';
+import type { ActorContext, MaterialFields, MaterialSummary, MaterialSharing } from '@cpms/domain';
 
 export const MATERIAL_REPOSITORY = Symbol('MATERIAL_REPOSITORY');
 
 export interface PersistMaterialRecord {
+  sharing?: MaterialSharing;
+  creationClientKey?: string;
   materialId: string;
   fields: MaterialFields;
   recordVersion: number;
@@ -18,9 +20,10 @@ export interface MaterialReferenceRow {
 }
 
 export interface MaterialRepository {
+  findCreationReceipts?(clientKeys: readonly string[], actor: ActorContext): Promise<Array<{ clientKey: string; material: MaterialSummary; unavailable?: boolean }>>;
   list(includeDeleted: boolean): Promise<MaterialSummary[]>;
   findByMaterialIds(materialIds: readonly string[]): Promise<MaterialSummary[]>;
-  saveBatch(records: readonly PersistMaterialRecord[], actor: ActorContext, auditAction: string): Promise<MaterialSummary[]>;
+  saveBatch(records: readonly PersistMaterialRecord[], actor: ActorContext, auditAction: string): Promise<Array<MaterialSummary & { creationClientKey?: string; replayed?: boolean }>>;
   purge(materialId: string, expectedVersion: number, actor: ActorContext): Promise<void>;
   listReferences(types: readonly string[]): Promise<MaterialReferenceRow[]>;
 }

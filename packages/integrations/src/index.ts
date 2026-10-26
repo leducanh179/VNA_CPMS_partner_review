@@ -78,7 +78,7 @@ export interface CloudSpreadsheetResultTab {
 
 export interface CloudSpreadsheetPort {
   metadata(accessToken: string, spreadsheetId: string): Promise<CloudSpreadsheetMetadata>;
-  readTab(accessToken: string, spreadsheetId: string, tabTitle: string): Promise<TabularSheetData>;
+  readTab(accessToken: string, spreadsheetId: string, tabTitle: string, options?: { purpose: 'AI_LIBRARY' }): Promise<TabularSheetData>;
   createTab(input: {
     accessToken: string;
     spreadsheetId: string;
@@ -98,6 +98,8 @@ export interface CloudDriveCapabilities {
   canDownload: boolean;
   canAddChildren: boolean;
   canShare: boolean;
+  canDisableInheritedPermissions?: boolean;
+  canEnableInheritedPermissions?: boolean;
 }
 
 export interface CloudDriveItem {
@@ -114,6 +116,9 @@ export interface CloudDriveItem {
   trashedBy: string | null;
   webViewLink: string | null;
   webContentLink: string | null;
+  shortcutDetails: { targetId: string; targetMimeType: string | null; targetResourceKey: string | null } | null;
+  uploadId?: string | null;
+  inheritedPermissionsDisabled?: boolean;
   capabilities: CloudDriveCapabilities;
 }
 
@@ -121,8 +126,12 @@ export interface CloudDrivePermission {
   id: string;
   type: string;
   role: string;
+  emailAddress: string | null;
+  displayName: string | null;
   allowFileDiscovery: boolean | null;
   inherited: boolean;
+  inheritedRole?: string | null;
+  directRole?: string | null;
 }
 
 export interface CloudDrivePage {
@@ -136,16 +145,21 @@ export interface CloudDriveUpload {
 }
 
 export interface CloudDrivePort {
-  getItem(accessToken: string, fileId: string): Promise<CloudDriveItem>;
+  getItem(accessToken: string, fileId: string, resourceKey?: string): Promise<CloudDriveItem>;
   findFolders(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; nameContains?: string; exactName?: string }): Promise<CloudDriveItem[]>;
   createFolder(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string }): Promise<CloudDriveItem>;
   renameItem(input: { accessToken: string; fileId: string; name: string }): Promise<CloudDriveItem>;
   setTrashed(input: { accessToken: string; fileId: string; trashed: boolean }): Promise<CloudDriveItem>;
   moveItem(input: { accessToken: string; fileId: string; fromParentIds: string[]; toParentId: string }): Promise<CloudDriveItem>;
-  listFiles(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; trashed: boolean; pageSize: number; pageToken?: string }): Promise<CloudDrivePage>;
+  listFiles(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; trashed: boolean; pageSize: number; pageToken?: string; orderBy?: string; uploadId?: string }): Promise<CloudDrivePage>;
+  downloadFile(input: { accessToken: string; fileId: string; maxBytes: number; exportMimeType?: string }): Promise<Uint8Array>;
   listPermissions(accessToken: string, fileId: string): Promise<CloudDrivePermission[]>;
   createLinkWriterPermission(accessToken: string, fileId: string): Promise<CloudDrivePermission>;
-  upload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array; resumableThresholdBytes: number }): Promise<CloudDriveUpload>;
+  createPermission(input: { accessToken: string; fileId: string; type: 'user' | 'anyone'; role: 'reader' | 'commenter' | 'writer'; emailAddress?: string }): Promise<CloudDrivePermission>;
+  updatePermission(input: { accessToken: string; fileId: string; permissionId: string; role: 'reader' | 'commenter' | 'writer' }): Promise<CloudDrivePermission>;
+  deletePermission(input: { accessToken: string; fileId: string; permissionId: string }): Promise<void>;
+  setInheritedPermissionsDisabled(input: { accessToken: string; fileId: string; disabled: boolean }): Promise<CloudDriveItem>;
+  upload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array; resumableThresholdBytes: number; uploadId?: string }): Promise<CloudDriveUpload>;
 }
 
 export const CLOUD_DRIVE_PORT = Symbol('CLOUD_DRIVE_PORT');

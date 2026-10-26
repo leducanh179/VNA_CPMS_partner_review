@@ -42,8 +42,7 @@ export const MATERIAL_COLUMNS: readonly MaterialColumn[] = definitions.map(([key
 }));
 
 export const DEFAULT_MATERIAL_COLUMNS: readonly MaterialFieldKey[] = [
-  'material_update_date', 'campaign', 'material_name', 'material_type', 'publish_status',
-  'material_link',
+  'material_update_date', 'campaign', 'material_name', 'material_link', 'material_type', 'publish_status',
   'material_description_rich_text', 'note',
 ];
 
@@ -79,7 +78,6 @@ export function newMaterialRow(clientKey: string): MaterialGridRow {
     submission_status: 'BOOKED',
     approval_status: 'BOOKED',
     publish_status: 'NOT_PUBLISHED',
-    visibility: 'INTERNAL',
     source: 'WEB_APP',
     is_deleted: 'FALSE',
     workflow_state: 'DRAFT',
@@ -91,7 +89,7 @@ export function duplicateMaterialRow(source: MaterialGridRow, clientKey: string)
   const duplicate = newMaterialRow(clientKey);
   const fields = { ...source.fields };
   for (const key of [
-    'material_id', 'updated_at', 'updated_by', 'created_at', 'created_by', 'record_version',
+    'material_id', 'updated_at', 'updated_by', 'created_at', 'created_by', 'record_version', 'visibility',
     'submitted_at', 'approved_at', 'approved_by', 'deleted_at', 'deleted_by', 'delete_reason',
     'viber_notified_at', 'viber_message', 'supplementary_link', 'supplementary_links', 'supplementary_link_1', 'supplementary_link_2', 'contract_ids',
   ] as MaterialFieldKey[]) delete fields[key];

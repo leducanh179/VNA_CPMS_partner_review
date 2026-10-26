@@ -1,3 +1,5 @@
+import { publishAiSelection, selectedCellText } from '../lib/ai-selection';
+import { PinnedColumnIndicator } from './pinned-column-indicator';
 import {
   CAMPAIGN_LIFECYCLE_STATES,
   CAMPAIGN_REFERENCE_OPTIONS,
@@ -10,7 +12,7 @@ import {
   type CampaignLifecycleState,
   type CampaignSummary,
 } from '@cpms/domain';
-import { Button, CpmsIcon, LoadingBlock, StatusBadge } from '@cpms/ui';
+import { Button, CpmsIcon, LoadingBlock } from '@cpms/ui';
 import {
   useEffect,
   useId,
@@ -51,6 +53,7 @@ import { useGridSave } from '../lib/use-grid-save';
 import { gridDestination } from '../lib/grid-navigation';
 import { useAccessCapabilities } from '../access-context';
 import { CampaignColumnFilterMenu, type CampaignColumnFilterAnchor } from './campaign-column-filter-menu';
+import { CampaignStatusChip } from './campaign-status-highlight';
 import {
   campaignGridDisplayValue,
   isCampaignColumnFilterable,
@@ -147,6 +150,8 @@ function statusTone(state: CampaignLifecycleState): 'positive' | 'warning' | 'ne
   if (['DRAFT', 'PAUSE_REQUESTED', 'CANCEL_REQUESTED'].includes(state)) return 'warning';
   return 'neutral';
 }
+
+const campaignFormDraftPath = (draft: CampaignFormDraftSummary) => `/campaigns/new?draft=${encodeURIComponent(draft.id)}`;
 
 function dirty(edit: GridEdit) {
   return edit.isNew || !campaignRowDraftEquals(edit.draft, edit.baseline);
@@ -404,6 +409,12 @@ export function CampaignInlineTable({
       draft: edits[campaign.id]?.draft ?? campaignToRowDraft(campaign),
     })),
   ], [campaigns, edits, newRows]);
+
+  useEffect(() => {
+    if (!selected.length) return;
+    const row=selected.length===1?displayRows.find(row=>row.key===selected[0]):undefined;
+    publishAiSelection(row?{title:row.draft.name,record:row.campaign?{kind:'CAMPAIGN',id:row.campaign.id}:undefined}:null);
+  }, [selected, displayRows]);
 
   const toggleSelected = (key: string) => setSelected((current) => current.includes(key)
     ? current.filter((item) => item !== key)
@@ -817,6 +828,8 @@ export function CampaignInlineTable({
       setActiveCell(null); void autosave.save([activeCell.rowKey]);
     }
     setFocusedGridItem({ kind: 'cell', rowKey, fieldKey });
+    const aiRow = displayRows.find(row=>row.key===rowKey), aiField = orderedDefinitions.find(field=>field.key===fieldKey);
+    if(aiRow&&aiField){const text=rowValue(aiRow,fieldKey);publishAiSelection({title:rowValue(aiRow,'campaign_name'),record:aiRow.campaign?{kind:'CAMPAIGN',id:aiRow.campaign.id}:undefined,label:aiField.label,fieldKey,text,readText:()=>selectedCellText(gridRoot.current?.querySelector<HTMLElement>('[data-campaign-selected-cell="true"]')??null,text)});}
     window.setTimeout(() => { const cell=gridRoot.current?.querySelector<HTMLElement>('[data-campaign-selected-cell="true"]'); if(cell&&!cell.contains(document.activeElement)) cell.focus(); }, 0);
   };
   const moveCell = (rowKey: string, fieldKey: string, key: string, shift = false) => {
@@ -883,15 +896,15 @@ export function CampaignInlineTable({
   const renderValue = (row: DisplayRow, definition: CampaignFieldDefinition): ReactNode => {
     const value = rowValue(row, definition.key);
     if (definition.key === 'campaign_code' && row.campaign) {
-      return <AppLink className="font-mono text-xs font-semibold text-vna-blue hover:underline" to={campaignDetailPath(row.campaign.id)}>{value}</AppLink>;
+      return <AppLink className="font-mono text-xs font-medium text-slate-600 underline-offset-4 hover:text-vna-blue hover:underline" to={campaignDetailPath(row.campaign.id)}>{value}</AppLink>;
     }
     if (definition.key === 'campaign_name' && row.campaign) {
-      return <AppLink className="font-semibold text-slate-900 underline-offset-4 hover:text-vna-blue hover:underline" to={campaignDetailPath(row.campaign.id)}>{value}</AppLink>;
+      return <AppLink className="font-semibold text-vna-blue underline-offset-4 hover:underline" to={campaignDetailPath(row.campaign.id)}>{value}</AppLink>;
     }
     if (definition.key === 'campaign_lifecycle_state') {
       const state = row.draft.lifecycleState;
       const label = row.campaign?.qcttStatus ?? CAMPAIGN_STATE_LABELS[state];
-      return <div><StatusBadge tone={label === 'Đã phê duyệt' ? 'positive' : statusTone(state)}>{label}</StatusBadge>{row.campaign?.pendingChangeLabel && <p className="mt-1 text-[10px] text-amber-700">{row.campaign.pendingChangeLabel}</p>}</div>;
+      return <div><CampaignStatusChip campaign={row.campaign} status={label} />{row.campaign?.pendingChangeLabel && <p className="mt-1 text-[10px] text-amber-700">{row.campaign.pendingChangeLabel}</p>}</div>;
     }
     if (definition.kind === 'date') return displayDate(value, false);
     if (definition.kind === 'dateTime') return displayDate(value, true);
@@ -958,7 +971,7 @@ export function CampaignInlineTable({
     const nextDirection = active && sortDirection === 'asc' ? 'desc' : 'asc';
     const hint = sortDirectionLabel(definition, nextDirection);
     return (
-      <div className="flex w-full items-center gap-1">
+      <div className="flex w-full items-center gap-1">{pinnedFields.includes(definition.key)&&<PinnedColumnIndicator label={definition.label}/>}
         <button
           type="button"
           draggable={false}
@@ -983,7 +996,7 @@ export function CampaignInlineTable({
           onClick={(event) => {
             event.stopPropagation();
             const rect = event.currentTarget.getBoundingClientRect();
-            setColumnFilterMenu({ fieldKey: definition.key, anchor: { left: rect.left, top: rect.bottom + 6 } });
+            setColumnFilterMenu({ fieldKey: definition.key, anchor: { left: rect.left, top: rect.bottom + 6, element: event.currentTarget } });
           }}
         ><CpmsIcon name="filter" size={16} /></button> : null}
       </div>
@@ -1118,7 +1131,7 @@ export function CampaignInlineTable({
                 {orderedDefinitions.map((definition) => (
                   <th
                     key={definition.key}
-                    className={`relative cursor-grab select-none border-b border-r border-slate-200 px-3 py-3 transition active:cursor-grabbing ${dragOverFieldKey === definition.key && draggedFieldKey !== definition.key ? `bg-cyan-50 ${dropPosition === 'before' ? 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-vna-blue' : 'after:absolute after:inset-y-0 after:right-0 after:w-1 after:bg-vna-blue'}` : 'bg-slate-50'} ${draggedFieldKey === definition.key ? 'opacity-55' : ''} ${pinnedFields.includes(definition.key) ? 'shadow-[2px_0_0_#e2e8f0]' : ''}`}
+                    className={`relative cursor-grab select-none border-b border-r border-slate-200 px-3 py-3 transition active:cursor-grabbing ${dragOverFieldKey === definition.key && draggedFieldKey !== definition.key ? `bg-cyan-50 ${dropPosition === 'before' ? 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-vna-blue' : 'after:absolute after:inset-y-0 after:right-0 after:w-1 after:bg-vna-blue'}` : pinnedFields.includes(definition.key) ? 'bg-cyan-100' : 'bg-slate-50'} ${draggedFieldKey === definition.key ? 'opacity-55' : ''} ${pinnedFields.includes(definition.key) ? 'shadow-[2px_0_0_#0891b2]' : ''}`}
                     style={{ width: definition.width, minWidth: definition.width, ...stickyStyle(definition) }}
                     draggable
                     data-campaign-column={definition.key}
@@ -1139,13 +1152,14 @@ export function CampaignInlineTable({
             </thead>
             <tbody>
               {!trashMode && formDrafts.map((draft) => <tr key={`form-draft-${draft.id}`} className="bg-amber-50/70">
-                <td className="border-b border-amber-100 px-3 py-3" />
-                <td colSpan={orderedDefinitions.length + 1} className="border-b border-amber-100 px-4 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div><span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">Bản nháp đang nhập · chỉ bạn nhìn thấy</span><span className="ml-3 font-semibold text-slate-800">{draft.title || 'Chưa đặt tên chiến dịch'}</span></div>
-                    <AppLink className="text-xs font-semibold text-vna-blue hover:underline" to={`/campaigns/new?draft=${encodeURIComponent(draft.id)}`}>Tiếp tục nhập</AppLink>
-                  </div>
-                </td>
+                <td className="sticky left-0 z-20 border-b border-r border-amber-100 bg-amber-50 px-3 py-3" />
+                {orderedDefinitions.map((definition) => <td key={definition.key} className="h-[58px] max-w-0 border-b border-r border-amber-100 bg-amber-50 px-3 py-2" style={{ width: definition.width, minWidth: definition.width, ...stickyStyle(definition) }}>
+                  {definition.key === 'campaign_code' ? <div>
+                    <AppLink className="font-mono text-xs font-medium text-slate-700 underline-offset-4 hover:text-vna-blue hover:underline" to={campaignFormDraftPath(draft)} title="Mã Chiến dịch được sinh sau khi lưu bản nháp">Chưa có mã</AppLink>
+                    <span className="mt-1 block text-[10px] text-amber-800">Chỉ bạn nhìn thấy</span>
+                  </div> : definition.key === 'campaign_name' ? <AppLink className="font-semibold text-vna-blue underline-offset-4 hover:underline" to={campaignFormDraftPath(draft)}>{draft.title || 'Chưa đặt tên chiến dịch'}</AppLink> : definition.key === 'campaign_lifecycle_state' ? <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-900">Bản nháp đang nhập</span> : null}
+                </td>)}
+                <td className="sticky right-0 z-10 border-b border-amber-100 bg-amber-50 px-3 py-2 text-right"><AppLink className="text-xs font-semibold text-vna-blue hover:underline" to={campaignFormDraftPath(draft)}>Tiếp tục nhập</AppLink></td>
               </tr>)}
               {displayRows.map((row) => {
                 const contextHighlighted = contextMenu?.kind === 'row' && contextMenu.rowKey === row.key;
@@ -1176,7 +1190,7 @@ export function CampaignInlineTable({
         </div>
       ) : (
         <>
-        {!trashMode && formDrafts.map((draft) => <div key={draft.id} className="flex items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm"><span><strong>Bản nháp đang nhập:</strong> {draft.title || 'Chưa đặt tên chiến dịch'}</span><AppLink to={`/campaigns/new?draft=${encodeURIComponent(draft.id)}`} className="font-semibold text-vna-blue">Tiếp tục nhập</AppLink></div>)}
+        {!trashMode && formDrafts.map((draft) => <div key={draft.id} className="flex items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm"><span><strong>Bản nháp đang nhập:</strong> <AppLink to={campaignFormDraftPath(draft)} className="font-mono text-xs text-slate-700 hover:underline">Chưa có mã</AppLink> · <AppLink to={campaignFormDraftPath(draft)} className="font-semibold text-vna-blue hover:underline">{draft.title || 'Chưa đặt tên chiến dịch'}</AppLink></span><AppLink to={campaignFormDraftPath(draft)} className="font-semibold text-vna-blue">Tiếp tục nhập</AppLink></div>)}
         <TimelineSplitView
           rows={displayRows}
           definitions={orderedDefinitions}
@@ -1447,7 +1461,7 @@ function TimelineSplitView({
         <div style={{ minWidth: leftWidth }}>
           <div data-campaign-grid-header className="grid h-16 border-b border-slate-200 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500" style={{ gridTemplateColumns: `48px ${definitions.map((definition) => `${definition.width ?? 180}px`).join(' ')}` }}>
             <div className="sticky left-0 z-30 grid place-items-center border-r border-slate-200 bg-slate-50"><input type="checkbox" aria-label="Chọn tất cả dòng đang hiển thị" checked={allVisibleSelected} onChange={onToggleAll} /></div>
-            {definitions.map((definition) => <div key={definition.key} data-campaign-column={definition.key} data-pinned={definition.key === timelinePinnedKey ? 'true' : 'false'} className={`relative flex cursor-grab select-none items-center border-r border-slate-200 px-3 transition active:cursor-grabbing ${dragOverFieldKey === definition.key && draggedFieldKey !== definition.key ? `bg-cyan-50 ${dropPosition === 'before' ? 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-vna-blue' : 'after:absolute after:inset-y-0 after:right-0 after:w-1 after:bg-vna-blue'}` : 'bg-slate-50'} ${draggedFieldKey === definition.key ? 'opacity-55' : ''}`} style={definition.key === timelinePinnedKey ? { ...stickyStyle(definition), zIndex: 22 } : undefined} draggable title={`Kéo để đổi vị trí cột ${definition.label}${pinnedFields.includes(definition.key) ? ' trong nhóm cột ghim' : ''}`} onDragStart={(event) => onColumnDragStart(event, definition.key)} onDragOver={(event) => onColumnDragOver(event, definition.key)} onDrop={(event) => onColumnDrop(event, definition.key)} onDragEnd={onColumnDragEnd} onContextMenu={(event) => onColumnContextMenu(event, definition)}>{headerCell(definition, true)}<button type="button" draggable={false} data-column-resize aria-label={`Kéo để đổi độ rộng cột ${definition.label}`} className="absolute inset-y-0 right-0 z-30 w-2 translate-x-1/2 cursor-col-resize touch-none hover:bg-cyan-300/50" onPointerDown={(event) => onStartColumnResize(event, definition)} /></div>)}
+            {definitions.map((definition) => <div key={definition.key} data-campaign-column={definition.key} data-pinned={definition.key === timelinePinnedKey ? 'true' : 'false'} className={`relative flex cursor-grab select-none items-center border-r border-slate-200 px-3 transition active:cursor-grabbing ${dragOverFieldKey === definition.key && draggedFieldKey !== definition.key ? `bg-cyan-50 ${dropPosition === 'before' ? 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-vna-blue' : 'after:absolute after:inset-y-0 after:right-0 after:w-1 after:bg-vna-blue'}` : pinnedFields.includes(definition.key) ? 'bg-cyan-100' : 'bg-slate-50'} ${draggedFieldKey === definition.key ? 'opacity-55' : ''}`} style={definition.key === timelinePinnedKey ? { ...stickyStyle(definition), zIndex: 22 } : undefined} draggable title={`Kéo để đổi vị trí cột ${definition.label}${pinnedFields.includes(definition.key) ? ' trong nhóm cột ghim' : ''}`} onDragStart={(event) => onColumnDragStart(event, definition.key)} onDragOver={(event) => onColumnDragOver(event, definition.key)} onDrop={(event) => onColumnDrop(event, definition.key)} onDragEnd={onColumnDragEnd} onContextMenu={(event) => onColumnContextMenu(event, definition)}>{headerCell(definition, true)}<button type="button" draggable={false} data-column-resize aria-label={`Kéo để đổi độ rộng cột ${definition.label}`} className="absolute inset-y-0 right-0 z-30 w-2 translate-x-1/2 cursor-col-resize touch-none hover:bg-cyan-300/50" onPointerDown={(event) => onStartColumnResize(event, definition)} /></div>)}
           </div>
           {rows.map((row) => {
             const contextHighlighted = highlightedRowKey === row.key;

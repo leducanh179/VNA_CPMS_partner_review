@@ -166,6 +166,104 @@ export async function verifyQcttPlan(app: INestApplication, db: PrismaService, a
   assert.equal(pasteHistory.length, 2); assert.equal(pasteHistory[0]!.actorName, manager.displayName);
   await assert.rejects(save(pasteItems), /version|đổi|phiên bản/i);
   pass('QCTT whole-row paste updates only the target, preserving identity, Booking links, rich/custom values and audited optimistic versions');
+  const beforeLayout = await plans.read(campaign.id, manager);
+  await assert.rejects(plans.command(campaign.id, { action: 'COLUMNS', idempotencyKey: randomUUID(), expectedVersion: beforeLayout.state.recordVersion,
+    columns: beforeLayout.state.columns.filter(column => column.key !== 'campaignId') }, manager), /đã có dữ liệu/);
+  const blankKey = `blank:${randomUUID()}`;
+  await plans.command(campaign.id, { action: 'COLUMNS', idempotencyKey: randomUUID(), expectedVersion: beforeLayout.state.recordVersion,
+    columns: [...beforeLayout.state.columns, { key: blankKey, label: 'Chọn trường…' }] }, manager);
+  const blankLayout = await plans.read(campaign.id, manager);
+  const newCustom = `custom:${randomUUID()}`;
+  await plans.command(campaign.id, { action: 'COLUMNS', idempotencyKey: randomUUID(), expectedVersion: blankLayout.state.recordVersion,
+    columns: blankLayout.state.columns.map(column => column.key === blankKey ? { key: newCustom, label: 'Cột mới' } : column) }, manager);
+  const positionedBefore = await plans.read(campaign.id, manager);
+  const insertTarget = positionedBefore.items.find(item => item.id === pasteTarget.id)!;
+  const insertionKey = randomUUID();
+  const insertion = [{ fields: { ...customFields, requirements: 'Chèn trước dòng thử' }, position: insertTarget.sortOrder }];
+  await save(insertion, manager, campaign.id, insertionKey); await save(insertion, manager, campaign.id, insertionKey);
+  const inserted = await plans.read(campaign.id, manager);
+  const shiftedTarget = inserted.items.find(item => item.id === insertTarget.id)!;
+  assert.equal(inserted.items.length, positionedBefore.items.length + 1);
+  assert.equal(inserted.items.find(item => item.requirements === 'Chèn trước dòng thử')!.sortOrder, insertTarget.sortOrder);
+  assert.equal(shiftedTarget.sortOrder, insertTarget.sortOrder + 1);
+  assert.equal(shiftedTarget.recordVersion, insertTarget.recordVersion + 1);
+  assert.deepEqual(shiftedTarget.content, insertTarget.content); assert.deepEqual(inserted.bookings, positionedBefore.bookings);
+  assert.equal((await plans.history(campaign.id, shiftedTarget.id, manager))[0]!.action, 'plan.item.insert_shift');
+  await assert.rejects(save([{ id: shiftedTarget.id, expectedVersion: shiftedTarget.recordVersion, position: 1, fields: customFields }]), /dòng mới/);
+  await assert.rejects(save([{ fields: customFields, position: 1 }, { fields: { ...customFields, departmentId: randomUUID() } }]), /CQ, ĐV/);
+  assert.deepEqual((await plans.read(campaign.id, manager)).items, inserted.items);
+  const sparsePosition = Math.max(...inserted.items.map(item => item.sortOrder)) + 5;
+  await save([{ fields: { ...customFields, requirements: 'Ô trống xa cuối bảng' }, position: sparsePosition }]);
+  assert.equal((await plans.read(campaign.id, manager)).items.find(item => item.requirements === 'Ô trống xa cuối bảng')!.sortOrder, sparsePosition);
+  pass('QCTT populated-column binding protection, blank/custom metadata, persisted insertion/sparse positions, shift audit/Booking preservation, idempotency and atomic rollback');
+  const beforeMulti = await plans.read(campaign.id, manager);
+  const addedColumns = Array.from({ length: 3 }, () => ({ key: `blank:${randomUUID()}`, label: 'Chọn trường…' }));
+  const multiColumnCommand = { action: 'COLUMNS' as const, idempotencyKey: randomUUID(), expectedVersion: beforeMulti.state.recordVersion,
+    columns: [...beforeMulti.state.columns, ...addedColumns] };
+  await plans.command(campaign.id, multiColumnCommand, manager); await plans.command(campaign.id, multiColumnCommand, manager);
+  const multiLayout = await plans.read(campaign.id, manager);
+  assert.deepEqual(multiLayout.state.columns.slice(-3), addedColumns); assert.equal(multiLayout.state.columns.length, beforeMulti.state.columns.length + 3);
+  assert.deepEqual(multiLayout.items, beforeMulti.items); assert.deepEqual(multiLayout.bookings, beforeMulti.bookings);
+  const blockPosition = Math.min(...multiLayout.items.map(item => item.sortOrder));
+  const rowBlock = Array.from({ length: 3 }, (_, index) => ({ position: blockPosition + index, fields: { ...customFields, requirements: `Chèn khối thử ${index}` } }));
+  const rowBlockKey = randomUUID(); await save(rowBlock, manager, campaign.id, rowBlockKey); await save(rowBlock, manager, campaign.id, rowBlockKey);
+  const afterMulti = await plans.read(campaign.id, manager);
+  assert.equal(afterMulti.items.length, multiLayout.items.length + 3);
+  for (let index = 0; index < 3; index++) assert.equal(afterMulti.items.find(item => item.requirements === `Chèn khối thử ${index}`)!.sortOrder, blockPosition + index);
+  for (const original of multiLayout.items) {
+    const shifted = afterMulti.items.find(item => item.id === original.id)!;
+    assert.equal(shifted.sortOrder, original.sortOrder + 3); assert.equal(shifted.recordVersion, original.recordVersion + 3);
+    assert.deepEqual(shifted.content, original.content); assert.deepEqual(shifted.customValues, original.customValues);
+  }
+  assert.deepEqual(afterMulti.bookings, multiLayout.bookings);
+  pass('QCTT three-column metadata and three-row insertion blocks persist atomically with exact positions, audited shifts, unchanged Bookings and idempotent retries');
+  const partialCampaign = await createCampaign('Kế hoạch nhập dở giả lập');
+  const partialKey = randomUUID();
+  const partialRows = [
+    { fields: { ...emptyQcttPlanFields(), requirements: 'Chỉ nhập ghi chú trước' } },
+    { fields: { ...emptyQcttPlanFields(), professionLayer: 'PFL-002', channelCode: 'CHN-004' } },
+    { fields: emptyQcttPlanFields() },
+  ];
+  await save(partialRows, manager, partialCampaign.id, partialKey);
+  await save(partialRows, manager, partialCampaign.id, partialKey);
+  const partialView = await plans.read(partialCampaign.id, requester);
+  assert.equal(partialView.items.length, 3);
+  assert.equal(await db.qcttPlan.count({ where: { campaignId: partialCampaign.id } }), 1);
+  assert(partialView.items.every(item => item.activityCode === null && item.activityLabel === '' && item.classification === null));
+  const noteOnly = partialView.items.find(item => item.requirements === 'Chỉ nhập ghi chú trước')!;
+  assert.equal(noteOnly.professionLayer, null); assert.equal(noteOnly.startDate, null);
+  assert.equal((await plans.history(partialCampaign.id, noteOnly.id, manager)).length, 1);
+  await save([{ id: noteOnly.id, expectedVersion: noteOnly.recordVersion, fields: { ...emptyQcttPlanFields(), requirements: noteOnly.requirements, ...fields } }], manager, partialCampaign.id);
+  const completedLater = (await plans.read(partialCampaign.id, requester)).items.find(item => item.id === noteOnly.id)!;
+  assert.equal(completedLater.activityCode, fields.activityCode);
+  assert.equal(completedLater.recordVersion, noteOnly.recordVersion + 1);
+  assert.equal((await plans.history(partialCampaign.id, noteOnly.id, manager)).length, 2);
+  await assert.rejects(save([{ id: noteOnly.id, expectedVersion: noteOnly.recordVersion, fields }], manager, partialCampaign.id), /thay đổi/);
+  pass('QCTT notes-only, classification-only and empty rows persist without an Activity; cross-account reload, idempotency, later completion and audited optimistic versions remain valid');
+  const orderBefore = await plans.read(campaign.id, manager);
+  const activeOrder = orderBefore.items.filter(item => !item.deletedAt), reversed = activeOrder.map(item => item.id).reverse();
+  const reorder = { action: 'REORDER', idempotencyKey: randomUUID(), expectedVersion: orderBefore.state.recordVersion, itemIds: reversed };
+  await plans.command(campaign.id, reorder, manager); await plans.command(campaign.id, reorder, manager);
+  const reordered = await plans.read(campaign.id, requester), positions = activeOrder.map(item => item.sortOrder);
+  assert.deepEqual(reordered.items.filter(item => !item.deletedAt).map(item => item.id), reversed);
+  assert.deepEqual(reordered.items.filter(item => !item.deletedAt).map(item => item.sortOrder), positions);
+  assert.deepEqual(reordered.bookings, orderBefore.bookings);
+  for (const original of orderBefore.items) {
+    const current = reordered.items.find(item => item.id === original.id)!;
+    const moved = !original.deletedAt && current.sortOrder !== original.sortOrder;
+    assert.deepEqual({ ...current, sortOrder: original.sortOrder, recordVersion: original.recordVersion, updatedAt: original.updatedAt }, original);
+    assert.equal(current.recordVersion, original.recordVersion + Number(moved));
+    if (moved) assert.equal((await plans.history(campaign.id, original.id, manager))[0]!.action, 'plan.item.reorder');
+  }
+  await assert.rejects(plans.command(campaign.id, { ...reorder, idempotencyKey: randomUUID() }, manager), /thay đổi/);
+  for (const itemIds of [reversed.slice(1), [...reversed.slice(1), reversed[1]!], [...reversed.slice(1), otherRow.id]]) {
+    await assert.rejects(plans.command(campaign.id, { ...reorder, idempotencyKey: randomUUID(), expectedVersion: reordered.state.recordVersion, itemIds }, manager), /đúng các dòng/);
+  }
+  assert.deepEqual((await plans.read(campaign.id, manager)).items, reordered.items);
+  const restoredOrder = { ...reorder, idempotencyKey: randomUUID(), expectedVersion: reordered.state.recordVersion, itemIds: activeOrder.map(item => item.id) };
+  await plans.command(campaign.id, restoredOrder, manager);
+  assert.deepEqual((await plans.read(campaign.id, manager)).items.filter(item => !item.deletedAt).map(item => item.id), activeOrder.map(item => item.id));
+  pass('QCTT Timeline reorder persists across readers with sparse positions, immutable content/Bookings/Trash, audited versions, idempotent retry and atomic stale/duplicate/foreign rejection');
   if(process.argv.includes('--serve-plans')) {
     const qaAdmin=await person('catalog-admin');
     await db.scopedRoleBinding.create({data:{actorId:qaAdmin.id,roleCode:'ADMIN',scopeType:'SYSTEM',scopeKey:JSON.stringify(['SYSTEM',null,null,null]),relation:'ALL'}});

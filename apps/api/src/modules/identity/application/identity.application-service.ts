@@ -23,10 +23,15 @@ const pilotAdminInput = z.object({
   email: z.email(), displayName: z.string().trim().min(1).max(120),
   password: z.string().refine(validateNewLocalPassword), reason: z.string().trim().min(1).max(1000),
 }).strict();
+const partnerDemoInput = z.object({
+  emails: z.array(z.email().transform(email => email.trim().toLowerCase()).refine(email => email.endsWith('@vietnamairlines.com'))).min(1).max(20),
+  password: z.string().refine(validateNewLocalPassword), reason: z.string().trim().min(1).max(1000),
+}).strict();
 
 export function isLoginAccount(account: LocalAccount): boolean {
   return account.accountKind === 'PERSONNEL' && Boolean(account.personnelEmployeeCode) ||
-    account.accountKind === 'PILOT_ADMIN' && account.personnelEmployeeCode === null && account.roles.includes('ADMIN');
+    account.accountKind === 'PILOT_ADMIN' && account.personnelEmployeeCode === null && account.roles.includes('ADMIN') ||
+    account.accountKind === 'PARTNER_DEMO' && account.personnelEmployeeCode === null && account.roles.length === 1 && account.roles[0] === 'VIEWER';
 }
 
 export function isDirectLocalSuperadmin(session: StoredLocalSession): boolean {
@@ -128,6 +133,14 @@ export class IdentityApplicationService {
     }
     return publicLocalAccount(await this.repository.createPilotAdmin(session.id, parsed.data.email.toLowerCase(),
       parsed.data.displayName, await hashLocalPassword(parsed.data.password), parsed.data.reason));
+  }
+  async createPartnerDemos(session: StoredLocalSession, input: unknown) {
+    this.requireAdmin(session);
+    const parsed = partnerDemoInput.safeParse(input);
+    if (!parsed.success || new Set(parsed.data.emails).size !== parsed.data.emails.length) throw new BadRequestException('Email demo, mật khẩu hoặc lý do không hợp lệ.');
+    const hashes: string[] = [];
+    for (let index = 0; index < parsed.data.emails.length; index++) hashes.push(await hashLocalPassword(parsed.data.password));
+    return (await this.repository.createPartnerDemos(session.id, parsed.data.emails.map((email, index) => ({ email, passwordHash: hashes[index]! })), parsed.data.reason)).map(publicLocalAccount);
   }
   async updateGmail(session: StoredLocalSession, actorId: string, input: unknown) {
     this.requireAdmin(session);

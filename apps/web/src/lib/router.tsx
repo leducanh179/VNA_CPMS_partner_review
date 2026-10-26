@@ -17,6 +17,7 @@ export function registerPendingNavigationGuard(guard: () => Promise<boolean>) {
 }
 
 export type AppRoute =
+  | { name: 'ai-home' }
   | { name: 'qctt-plans' }
   | { name: 'qctt-plan-detail'; id: string }
   | { name: 'qctt-catalog' }
@@ -48,7 +49,8 @@ function normalizePath(pathname: string) {
 
 export function matchRoute(pathname: string): AppRoute {
   const path = normalizePath(pathname);
-  if (path === '/') return { name: 'dashboard' };
+  if (path === '/') return { name: 'ai-home' };
+  if (path === '/overview') return { name: 'dashboard' };
   if (path === '/qctt-plans') return { name: 'qctt-plans' };
   const planMatch = path.match(/^\/qctt-plans\/([^/]+)$/);
   if (planMatch?.[1]) return { name: 'qctt-plan-detail', id: decodeURIComponent(planMatch[1]) };

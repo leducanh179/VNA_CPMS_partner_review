@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { QcttPlanApplicationService } from '../../qctt-plan/application/qctt-plan.application-service';
+import { MaterialApplicationService } from '../../material/application/material.application-service';
 import type { AccessPermission, AccessResource, ActorContext, BookingAllocationAccess, BookingBatchItem, BookingBootstrap, BookingCheck, BookingContext, BookingListItem, BookingTemplate, BookingView, SupplyAggregate } from '@cpms/domain';
 import { BOOKING_METRICS, automaticBookingDistribution, formatSupplyPeriod, type BookingImpact, type SupplyInventory } from '@cpms/domain';
 import { AccessApplicationService } from '../../access/application/access.application-service';
@@ -17,6 +18,7 @@ import { BookingConsumptionProvider, projectBookingConsumption } from '../infras
 import { contractBookingSnapshot } from '@cpms/domain';
 import { BOOKING_APPROVAL_OPERATIONS, bookingApprovalRequired, bookingOperationLabels, type BookingAction, type BookingApprovalActions } from '@cpms/domain';
 import { activeBookingDelegation, bookingDelegationSnapshot, bookingRequestDelegations } from '@cpms/domain';
+import { projectMaterialReferences } from './material-reference-projection';
 
 const parse=<T>(schema:z.ZodType<T>,input:unknown)=>{const result=schema.safeParse(input);if(!result.success)throw new BadRequestException(result.error.issues.map(i=>`${i.path.join('.')}: ${i.message}`).join('; '));return result.data;};
 const distinct=(ids:string[])=>{if(new Set(ids).size!==ids.length)throw new BadRequestException('Một booking không được xuất hiện hai lần trong cùng thao tác.');};
@@ -27,7 +29,11 @@ export class BookingApplicationService {
     @Inject(ContractsRepository) private readonly contracts:ContractsRepository,
     @Inject(AccessApplicationService) private readonly access:AccessApplicationService,
     @Inject(BookingConsumptionProvider) private readonly consumption:BookingConsumptionProvider,
-    @Inject(QcttPlanApplicationService) private readonly plans:QcttPlanApplicationService){}
+    @Inject(QcttPlanApplicationService) private readonly plans:QcttPlanApplicationService,
+    @Inject(MaterialApplicationService) private readonly materials:MaterialApplicationService){}
+  private async materialProjection<T>(value:T):Promise<T> {
+    return projectMaterialReferences(value,new Set((await this.materials.list()).map(m=>m.id)));
+  }
   private async contexts():Promise<BookingContext[]>{
     const [contracts,assignments,templates,delegations]=await Promise.all([this.contracts.list(),this.repository.allocationAccess(),this.repository.templates(),this.repository.delegations()]);
     const all=await Promise.all(contracts.map(c=>this.contracts.get(c.id)));
@@ -79,21 +85,21 @@ export class BookingApplicationService {
     const creatable=out.flatMap(c=>c.allocations.filter(a=>this.responsibilities(c,a.id).creator&&this.allowed('booking.create',this.allocationRow(a.id),c)).map(a=>{this.require('booking.create',this.allocationRow(a.id),c);return a.id;}));
     const planning=creatable.length?await this.plans.bookingCatalog():{campaigns:[],targets:{}};
     return {workflowPolicy:await this.repository.policy(),creatableAllocationIds:creatable,contracts:out,planTargets:planning.targets,campaigns:[...planning.campaigns,...catalog.campaigns.filter(c=>visibleCampaigns.includes(c.id)&&!planning.campaigns.some(p=>p.id===c.id))],people:catalog.people.filter(p=>this.access.check('booking.manage').allowed||personIds.has(p.id)),departments:catalog.departments,
-      materials:this.access.check('material.read').allowed?catalog.materials:[],canManage:this.access.check('booking.manage').allowed};
+      materials:(await this.materials.list()).map(m=>({id:m.id,name:m.fields.material_name||m.materialId,url:m.fields.material_link||null})),canManage:this.access.check('booking.manage').allowed};
   });}
   async list(query:{trash?:string;contractId?:string;campaignId?:string}={},actor?:ActorContext){return this.access.run(actor,async()=>{
     const contexts=await this.contexts();const visible=contexts.filter(c=>c.allocations.some(a=>this.allowed('booking.read',this.allocationRow(a.id),c)));
     if(!visible.length)this.access.require('booking.read');
     const rows=await this.repository.all(visible.map(c=>c.contract.id));
-    return rows.filter(r=>Boolean(r.deletedAt)===(query.trash==='true')&&(!query.contractId||r.contractId===query.contractId)&&(!query.campaignId||r.campaignId===query.campaignId)).flatMap(r=>{
+    return this.materialProjection(rows.filter(r=>Boolean(r.deletedAt)===(query.trash==='true')&&(!query.contractId||r.contractId===query.contractId)&&(!query.campaignId||r.campaignId===query.campaignId)).flatMap(r=>{
       const ctx=this.contextFor(r.contractId,contexts);if(!this.allowed('booking.read',r,ctx))return[];this.require('booking.read',r,ctx);return[this.item(r,ctx)];
-    });
+    }));
   });}
   async detail(id:string,actor?:ActorContext){return this.access.run(actor,async()=>{
     if(!z.string().uuid().safeParse(id).success)throw new NotFoundException('Không tìm thấy booking.');
     const [row]=await this.repository.get([id]);if(!row)throw new NotFoundException('Không tìm thấy booking.');
     const ctx=this.contextFor(row.contractId,await this.contexts());if(!this.allowed('booking.read',row,ctx))throw new NotFoundException('Không tìm thấy booking.');this.require('booking.read',row,ctx);
-    return{booking:this.item(row,ctx),history:await this.repository.history(id),templates:ctx.templates};
+    return this.materialProjection({booking:this.item(row,ctx),history:await this.repository.history(id),templates:ctx.templates});
   });}
   async policy(actor?:ActorContext){return this.access.run(actor,async()=>{this.access.require('booking.policy.manage');return this.repository.policy();});}
   async configurePolicy(input:unknown,actor?:ActorContext){const value=parse(z.object({required:z.boolean(),actions:z.object(Object.fromEntries(BOOKING_APPROVAL_OPERATIONS.map(k=>[k,z.boolean()])) as Record<typeof BOOKING_APPROVAL_OPERATIONS[number],z.ZodBoolean>).strict().optional(),expectedVersion:z.number().int().min(0),reason:z.string().trim().min(1).max(2000)}).strict(),input);return this.access.run(actor,async()=>{this.access.require('booking.policy.manage');return this.repository.savePolicy(value.actions?Object.values(value.actions).some(Boolean):value.required,value.expectedVersion,value.reason,this.access.snapshot().actor,value.actions as BookingApprovalActions|undefined);});}
@@ -138,7 +144,7 @@ export class BookingApplicationService {
       const pending=reportDue||item.workflowActions?.some(a=>['APPROVE','CONFIRM','RETURN','REPORT_APPROVE','REPORT_RETURN','LIFECYCLE_APPROVE'].includes(a));
       const following=row.createdByActorId===who||row.workflow?.submittedBy===who||row.lifecycleRequest?.requestedBy===who||row.reportPeriods?.some(r=>r.submittedBy===who);
       return pending||following?[{id:row.id,section:pending?'PENDING':'FOLLOWING',booking:item,canRespond:Boolean(pending),reportDue,label:row.lifecycleRequest?.status==='PENDING'?`Chờ ${item.approvalDelegations?.length?'CV được ủy quyền / LĐP':'LĐP'} duyệt ${bookingOperationLabels[row.lifecycleRequest.action].toLocaleLowerCase('vi-VN')}`:reportDue?'Cần nộp báo cáo cuối kỳ':row.reportState==='PENDING'?'Chờ phê duyệt báo cáo':row.workflow?.status==='PENDING_LEADER'&&item.approvalDelegations?.length?'Chờ CV được ủy quyền / LĐP duyệt':row.workflow?bookingApprovalLabels[row.workflow.status]:'Đặt chỗ đã có hiệu lực'}]:[];
-    });return {items};
+    });return this.materialProjection({items});
   });}
   async workflow(input:unknown,actor?:ActorContext){const command=parse(bookingWorkflowCommand,input);return this.access.run(actor,async()=>{
     distinct(command.items.map(i=>i.id));const contexts=await this.contexts();await this.repository.lock(contexts.map(c=>c.contract.id));
@@ -194,6 +200,7 @@ export class BookingApplicationService {
   private async prepare(items:BookingBatchItem[],contexts:BookingContext[],all:BookingView[],reserveDrafts=false,persistPlans=false):Promise<BookingCheck>{
     distinct(items.flatMap(i=>i.id?[i.id]:[]));const issues:BookingCheck['issues']=[];const rows:BookingView[]=[];
     const catalog=await this.repository.catalog();const actor=this.access.snapshot().actor;const policy=await this.repository.policy();
+    const visibleMaterials=new Set((await this.materials.list()).map(m=>m.id));
     for(const [index,item] of items.entries()){
       try{
         const before=item.id?all.find(r=>r.id===item.id):null;if(item.id&&!before)throw new Error('Không tìm thấy booking.');
@@ -206,7 +213,10 @@ export class BookingApplicationService {
         if(before&&bookingPending(before)&&!(before.workflow?.status==='PENDING_VENDOR'&&roles.vendor))throw Error('Rút đề nghị đang chờ duyệt trước khi sửa.');
         if(before&&before.contractId!==ctx.contract.id)throw Error('Không chuyển một booking sang hợp đồng khác; tạo booking riêng.');
         if(item.fields.campaignId){const open=(await this.plans.bookingCatalog()).campaigns.some(c=>c.id===item.fields.campaignId);if(!open)await this.access.campaign(item.fields.campaignId);const campaign=catalog.campaigns.find(c=>c.id===item.fields.campaignId);if(!campaign)throw new Error('Chiến dịch không còn khả dụng.');item.fields.campaignLabel=campaign.name;}
-        if(item.fields.materialId){this.access.require('material.read');if(!catalog.materials.some(m=>m.id===item.fields.materialId))throw new Error('Tư liệu không còn khả dụng.');}
+        // A read projection hides a restricted reference; unrelated Booking edits must not erase it.
+        if(before?.materialId&&!visibleMaterials.has(before.materialId)&&!item.fields.materialId&&!item.fields.materialUrl)
+          item.fields={...item.fields,materialId:before.materialId,materialUrl:before.materialUrl};
+        else if(item.fields.materialId&&!visibleMaterials.has(item.fields.materialId))throw new Error('Tư liệu không còn khả dụng.');
         if(before?.deletedAt)throw new BadRequestException('Phục hồi đặt chỗ trước khi sửa thông tin.');
         item.fields={planItemId:before?.campaignId===item.fields.campaignId&&before?.allocationId===item.fields.allocationId?before.planItemId??null:null,overallStartDate:before?.overallStartDate??null,overallEndDate:before?.overallEndDate??null,campaignDatesAuto:before?.campaignDatesAuto??false,timeDistribution:before?.timeDistribution??automaticBookingDistribution(),...item.fields};
         if(!item.fields.campaignId)item.fields.campaignDatesAuto=false;
@@ -250,7 +260,7 @@ export class BookingApplicationService {
     const contexts=await this.contexts(), all=await this.repository.all();
     const check=await this.prepare(command.items,contexts,all,true), asOf=new Date().toISOString();
     const output:BookingImpact={...check,asOf,contracts:[]};
-    if(check.rows.length!==command.items.length)return output;
+    if(check.rows.length!==command.items.length)return this.materialProjection(output);
     const ids=new Set(check.rows.map(r=>r.id));
     const next=[...all.filter(r=>!ids.has(r.id)),...check.rows];
     const affected=new Set([...check.rows.map(r=>r.allocationId),...all.filter(r=>ids.has(r.id)).map(r=>r.allocationId)]);
@@ -262,10 +272,10 @@ export class BookingApplicationService {
       const scoped=(v:SupplyInventory):SupplyInventory=>({...v,rows:v.rows.filter(r=>allowed.has(r.allocationId)),amountTotals:{baseline:null,effective:null,remaining:null,used:null},quantityTotals:[]});
       output.contracts.push({contractId:ctx.contract.id,contractName:ctx.contract.name,before:scoped(before),after:scoped(after)});
     }
-    return output;
+    return this.materialProjection(output);
   });}
   async check(input:unknown,actor?:ActorContext){const command=parse(bookingBatch,input);return this.access.run(actor,async()=>{
-    const contexts=await this.contexts();return this.prepare(command.items,contexts,await this.repository.all());
+    const contexts=await this.contexts();return this.materialProjection(await this.prepare(command.items,contexts,await this.repository.all()));
   });}
   async save(input:unknown,actor?:ActorContext){const command=parse(bookingBatch,input);return this.access.run(actor,async()=>{
     const contexts=await this.contexts();await this.repository.lock(contexts.map(c=>c.contract.id));

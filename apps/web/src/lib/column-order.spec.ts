@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { columnDragAutoScrollDelta, moveOrderedItem, moveOrderedItemAt } from './column-order';
+import { columnDragAutoScrollDelta, manualColumnPins, moveOrderedItem, moveOrderedItemAt, toggleManualColumnPin } from './column-order';
+
+describe('manual column pinning', () => {
+  it('removes legacy automatic pins once while retaining layout and deliberate new pins on reload', () => {
+    const legacy = { order: ['name', 'date', 'note'], pinned: ['name', 'date'], hidden: ['note'], widths: { name: 250 } };
+    const current = manualColumnPins(legacy);
+    expect(current).toEqual({ ...legacy, pinned: [], pinningVersion: 1 });
+    const deliberate = toggleManualColumnPin(current, 'note', legacy.order);
+    expect(manualColumnPins(JSON.parse(JSON.stringify(deliberate)))).toEqual(deliberate);
+    expect(deliberate.hidden).toEqual(legacy.hidden);
+  });
+
+  it('retains exact displayed order when any pinned column is unpinned, including the first of several', () => {
+    const keys = ['name', 'date', 'note', 'channel'];
+    const first = toggleManualColumnPin({ order: keys, pinned: [] }, 'note', keys);
+    const second = toggleManualColumnPin(first, 'channel', keys);
+    expect(second.order).toEqual(['note', 'channel', 'name', 'date']);
+    const unpinned = toggleManualColumnPin(second, 'note', keys);
+    expect(unpinned.order).toEqual(second.order);
+    expect(unpinned.pinned).toEqual(['channel']);
+    expect(toggleManualColumnPin(unpinned, 'channel', keys).order).toEqual(second.order);
+  });
+});
 
 describe('moveOrderedItem', () => {
   it('moves a column to the dropped column position', () => {

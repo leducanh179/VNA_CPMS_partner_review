@@ -14,8 +14,8 @@ describe('canonical Campaign field policy (adapter integration pending)', () => 
     ['name', 'campaign_name'], ['fieldValues.campaign_name', 'campaign_name'], ['levelCode', 'campaign_level_code'],
     ['startDate', 'campaign_comm_start_date'], ['kpi_text', 'kpi_primary'], ['primary_objective_code', 'campaign_objective'],
   ])('canonicalizes %s to %s', (alias, fieldKey) => expect(canonicalCampaignFieldKey(alias)).toBe(fieldKey));
-  it('preserves all 87 registry definitions and an unchanged unknown legacy object', () => {
-    expect(CAMPAIGN_FIELD_DEFINITIONS).toHaveLength(87);
+  it('preserves all 89 registry definitions and an unchanged unknown legacy object', () => {
+    expect(CAMPAIGN_FIELD_DEFINITIONS).toHaveLength(89);
     expect(inspectCampaignFieldChanges({ mystery: { b: 2, a: 1 } }, { fieldValues: { mystery: { a: 1, b: 2 } } })).toEqual({ fields: [], errors: [] });
   });
   it('ignores unchanged locked fields in full payloads after normalization', () => {

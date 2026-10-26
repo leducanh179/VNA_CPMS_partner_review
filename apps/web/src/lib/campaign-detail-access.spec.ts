@@ -25,13 +25,12 @@ describe('Campaign detail tab access', () => {
   });
 
   it('opens an explicitly requested approval tab only for authorized viewers', () => {
-    expect(shouldOpenCampaignApprovalTab('approval', true, false)).toBe(true);
-    expect(shouldOpenCampaignApprovalTab('approval', false, true)).toBe(false);
-    expect(shouldOpenCampaignApprovalTab('information', true, true)).toBe(false);
+    expect(shouldOpenCampaignApprovalTab('approval', true)).toBe(true);
+    expect(shouldOpenCampaignApprovalTab('approval', false)).toBe(false);
+    expect(shouldOpenCampaignApprovalTab('information', true)).toBe(false);
   });
 
-  it('preserves the default approval tab after workflow access loads', () => {
-    expect(shouldOpenCampaignApprovalTab(null, true, false)).toBe(false);
-    expect(shouldOpenCampaignApprovalTab(null, true, true)).toBe(true);
+  it('keeps Information as the default even after approval access loads', () => {
+    expect(shouldOpenCampaignApprovalTab(null, true)).toBe(false);
   });
 });

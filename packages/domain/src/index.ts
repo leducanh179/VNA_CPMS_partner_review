@@ -8,6 +8,7 @@ export * from './campaign-drive';
 export * from './campaign-collaboration';
 export * from './catalogs';
 export * from './material';
+export * from './material-sharing';
 export * from './roles';
 export * from './access-policy';
 export * from './personnel-import';

@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@cpms/ai-contracts": "workspace:*",
     "@cpms/domain": "workspace:*",
     "@cpms/ui": "workspace:*",
     "react": "^19.1.1",

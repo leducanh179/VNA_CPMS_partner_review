@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearGridRows, readGridRows, rememberGridRows } from './grid-row-clipboard';
+import { clearGridRows, gridClipboardScope, readGridRows, rememberGridRows } from './grid-row-clipboard';
 
 describe('typed row clipboard', () => {
   beforeEach(clearGridRows);
@@ -24,5 +24,14 @@ describe('typed row clipboard', () => {
   it('enforces the existing 50-row limit before changing the clipboard', () => {
     expect(() => rememberGridRows({ scope: 'QCTT_PLAN', text: 'Too many', rows: Array.from({ length: 51 }, () => ({ field: '' })) })).toThrow(/50/);
     expect(readGridRows('Too many', 'QCTT_PLAN')).toBeNull();
+  });
+  it('preserves the foreign scope when a context-menu paste only exposes plain text', () => {
+    const encoded = rememberGridRows({ scope: 'QCTT_PLAN', text: 'Title\n', rows: [{ activityLabel: 'Title' }] });
+    expect(gridClipboardScope('Title\r\n')).toBe('QCTT_PLAN');
+    expect(readGridRows('Title\n', 'MATERIAL')).toBeNull();
+    expect(gridClipboardScope('Other external text')).toBeNull();
+    clearGridRows();
+    expect(gridClipboardScope('Title\n', encoded)).toBe('QCTT_PLAN');
+    expect(gridClipboardScope('Title', '{invalid')).toBe('invalid');
   });
 });

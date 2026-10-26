@@ -26,6 +26,8 @@ export interface CampaignRecordValue {
   levelCode: CampaignLevelCode | null;
   effectiveStartDate: string;
   effectiveEndDate: string;
+  departureStartDate: string;
+  departureEndDate: string;
   startDate: string;
   endDate: string;
   communicationDatesAuto: boolean;
@@ -113,6 +115,8 @@ export function campaignRecordValue(campaign?: CampaignSummary): CampaignRecordV
     levelCode: campaign?.levelCode ?? null,
     effectiveStartDate: campaign?.effectiveStartDate ?? '',
     effectiveEndDate: campaign?.effectiveEndDate ?? '',
+    departureStartDate: campaign?.departureStartDate ?? '',
+    departureEndDate: campaign?.departureEndDate ?? '',
     startDate: campaign?.startDate ?? '',
     endDate: campaign?.endDate ?? '',
     communicationDatesAuto: communicationDatesAreAutomatic(campaign),
@@ -199,6 +203,8 @@ function commonFields(value: CampaignRecordValue) {
     endDate: optionalText(value.endDate),
     effectiveStartDate: optionalText(value.effectiveStartDate),
     effectiveEndDate: optionalText(value.effectiveEndDate),
+    departureStartDate: optionalText(value.departureStartDate),
+    departureEndDate: optionalText(value.departureEndDate),
     levelCode: value.levelCode,
     requestingEmployeeCode: optionalText(value.requestingEmployeeCode),
     manualRequesterEmail: optionalText(value.manualRequesterEmail),
@@ -252,7 +258,10 @@ export function validateCampaignRecord(value: CampaignRecordValue, allowLegacyMi
   if (!value.name.trim()) return 'Tên chiến dịch là bắt buộc.';
   if (!value.levelCode && !allowLegacyMissingLevel) return 'Cấp chiến dịch là bắt buộc.';
   if (value.effectiveStartDate && value.effectiveEndDate && value.effectiveStartDate > value.effectiveEndDate) {
-    return 'Thời gian hiệu lực: ngày bắt đầu không được sau ngày kết thúc.';
+    return 'Thời gian hiệu lực chương trình/xuất vé: ngày bắt đầu không được sau ngày kết thúc.';
+  }
+  if (value.departureStartDate && value.departureEndDate && value.departureStartDate > value.departureEndDate) {
+    return 'Thời gian hiệu lực khởi hành: ngày bắt đầu không được sau ngày kết thúc.';
   }
   if (value.startDate && value.endDate && value.startDate > value.endDate) {
     return 'Thời gian QCTT: ngày bắt đầu không được sau ngày kết thúc.';

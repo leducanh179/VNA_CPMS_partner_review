@@ -1,0 +1,123 @@
+openapi: 3.1.0
+info:
+  title: CPMS AI Lookup
+  version: 2.0.0
+  description: Authenticated, read-only business lookup. Persisted private conversation and usage ledger; default AI_MODE=OFF.
+security:
+  - localSession: []
+paths:
+  /api/ai/lookup/status:
+    get:
+      operationId: getLookupStatus
+      responses:
+        '200':
+          description: Actor eligibility, availability and estimated monthly VND usage; never credentials.
+        '401':
+          description: Session required.
+  /api/ai/lookup/conversations:
+    get:
+      operationId: listLookupConversations
+      parameters:
+        - in: query
+          name: cursor
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Twenty own saved conversations and nextCursor. No time-based expiry.
+        '403':
+          description: Direct active session required.
+  /api/ai/lookup/conversations/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: readLookupConversation
+      parameters:
+        - in: query
+          name: before
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Conversation metadata and twenty turns, oldest first, with nextCursor for older turns. Historical answers retain their timestamp; revoked source permissions redact content.
+        '404':
+          description: Missing, deleted or another account's conversation.
+    patch:
+      operationId: renameLookupConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [title, version]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 100 }
+                version: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Renamed own conversation.
+        '409':
+          description: Another rename already changed the version.
+    delete:
+      operationId: deleteLookupConversation
+      responses:
+        '200':
+          description: Own conversation content erased; budget ledger retained and in-flight completion cannot restore content.
+        '404':
+          description: Missing, deleted or another account's conversation.
+  /api/ai/lookup/ask:
+    post:
+      operationId: askLookup
+      parameters:
+        - in: header
+          name: x-cpms-csrf
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/lookup-request.v2.schema.json
+      responses:
+        '201':
+          description: Answer, verified CPMS source cards, run ID and estimated VND cost.
+        '400':
+          description: Invalid request or stale previous context.
+        '403':
+          description: Pilot, direct session, current data permissions or CSRF check failed.
+        '409':
+          description: Duplicate request ID or another turn is in progress.
+        '429':
+          description: Monthly budget cannot cover worst-case reserved cost.
+        '503':
+          description: Disabled or failed provider request. Review ledger before retrying.
+  /api/ai/lookup/context:
+    post:
+      operationId: previewLookupContext
+      description: Read-only explicit context preview. Exact pilot, direct session, CSRF and record/field permissions apply. No model call or charge.
+      parameters:
+        - in: header
+          name: x-cpms-csrf
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/lookup-context.v2.schema.json
+      responses:
+        '201':
+          description: Authorized title, text, truncation flag and sources. Ask revalidates against current server data.
+        '403':
+          description: Pilot or record permissions rejected.
+components:
+  securitySchemes:
+    localSession:
+      type: apiKey
+      in: cookie
+      name: cpms_session

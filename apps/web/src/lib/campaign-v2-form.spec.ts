@@ -67,6 +67,16 @@ describe('Campaign V2 form commands', () => {
     expect(validateCampaignRecord({ ...campaignRecordValue(old), name: 'Sửa tên' }, true, old)).toBeNull();
   });
 
+  it('keeps departure dates separate from ticket/program dates and validates their own range', () => {
+    const value = { ...campaignRecordValue(), name: 'Mở bán đường bay', levelCode: 'CLV_01' as const,
+      effectiveStartDate: '2026-10-01', effectiveEndDate: '2026-10-31',
+      departureStartDate: '2026-11-01', departureEndDate: '2027-03-31' };
+    expect(validateCampaignRecord(value, false)).toBeNull();
+    expect(toCreateCommand(value)).toMatchObject({ departureStartDate: '2026-11-01', departureEndDate: '2027-03-31' });
+    expect(toUpdateCommand(value, 3)).toMatchObject({ departureStartDate: '2026-11-01', departureEndDate: '2027-03-31' });
+    expect(validateCampaignRecord({ ...value, departureEndDate: '2026-10-31' }, false)).toContain('Thời gian hiệu lực khởi hành');
+  });
+
   it('creates a minimal draft with only name and level', () => {
     const value = { ...campaignRecordValue(), name: '  Bản nháp tối giản  ', levelCode: 'CLV_01' as const };
 

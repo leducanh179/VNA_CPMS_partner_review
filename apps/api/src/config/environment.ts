@@ -14,7 +14,11 @@ const environmentSchema = z.object({
   LOCAL_DEMO_CREDENTIALS: z.enum(['true', 'false']).default('false'),
   LOCAL_DEMO_CREDENTIAL_FILE: optionalText,
   DEMO_ACTOR_ID: z.string().uuid().default('00000000-0000-4000-8000-000000000001'),
-  AI_MODE: z.enum(['OFF', 'MOCK']).default('OFF'),
+  AI_MODE: z.enum(['OFF', 'MOCK', 'OPENAI']).default('OFF'),
+  AI_PILOT_ACTOR_ID: z.preprocess(value => value === '' ? undefined : value, z.string().uuid().optional()),
+  OPENAI_API_KEY_FILE: optionalText,
+  AI_PRIOR_SPEND_VND: z.coerce.number().int().min(0).max(100_000).default(0),
+  AI_PRIOR_SPEND_PERIOD: z.preprocess(value => value === '' ? undefined : value, z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional()),
   GOOGLE_OAUTH_CLIENT_ID: optionalText,
   GOOGLE_PROVIDER_WRITES: z.enum(['BLOCKED', 'ENABLED']).default('BLOCKED'),
   GOOGLE_DRIVE_WRITES: z.enum(['BLOCKED', 'ENABLED']).default('BLOCKED'),
@@ -29,6 +33,9 @@ const environmentSchema = z.object({
   GOOGLE_DRIVE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().max(52_428_800).default(52_428_800),
   GOOGLE_DRIVE_RESUMABLE_THRESHOLD_BYTES: z.coerce.number().int().positive().default(5_242_880),
 }).superRefine((environment, context) => {
+  if (environment.AI_PRIOR_SPEND_VND > 0 && !environment.AI_PRIOR_SPEND_PERIOD) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['AI_PRIOR_SPEND_PERIOD'], message: 'Prior test spend must identify its billing month.' });
+  }
   const origin = new URL(environment.WEB_ORIGIN);
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname);
   if (origin.origin !== environment.WEB_ORIGIN || origin.username || origin.password || !['http:', 'https:'].includes(origin.protocol)) {

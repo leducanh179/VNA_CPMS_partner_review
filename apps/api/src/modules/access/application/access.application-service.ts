@@ -63,6 +63,10 @@ export class AccessApplicationService {
     if (!decision.allowed) throw new ForbiddenException({ message: 'Không có quyền thực hiện thao tác trong phạm vi này.', code: decision.reason });
     this.snapshot().requiredAtCommit.push({ permission, ...(resource ? { resource } : {}), ...(fieldKey ? { fieldKey } : {}) });
   }
+  /** Private, actor-owned input is distinct from creating a business record. */
+  requireFormDraft(module: 'campaign' | 'contract' | 'material') {
+    this.require(this.snapshot().identity.readOnlyDemo ? `${module}.read` : `${module}.create`);
+  }
   async campaign(id: string): Promise<AccessResource> {
     this.snapshot();
     const resource = (await this.repository.campaignMetadata({ id }))[0];

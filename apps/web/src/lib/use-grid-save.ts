@@ -144,5 +144,10 @@ export function useGridSave({ scope, enabled, value, restore, commit, root, edit
     return () => { document.removeEventListener('pointerdown', keepEditorFocus, true); document.removeEventListener('click', outside, true); unregister(); };
   }, [enabled, root, busy]);
 
-  return { save, ready, busy, status };
+  const preserve = () => enqueue(async () => {
+    await checkpoint();
+    setStatus(Object.keys(latest.current.value).length ? 'Đã lưu bản nhập dở riêng.' : 'Đã lưu');
+    return true;
+  });
+  return { save, preserve, ready, busy, status };
 }

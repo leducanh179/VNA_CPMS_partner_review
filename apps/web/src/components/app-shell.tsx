@@ -1,21 +1,23 @@
 import { Button, CpmsIcon, StatusBadge, Tooltip } from '@cpms/ui';
-import { useCallback, useEffect, useState, type PropsWithChildren } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties, type PropsWithChildren } from 'react';
 import { AppLink } from '../lib/router';
 import { useAuth } from '../auth-context';
 import { useAccessCapabilities } from '../access-context';
 import { requestJson } from '../lib/api';
 import { PersonalNotes } from './personal-notes';
+import { AiAssistant } from './ai-assistant';
 
 const navigation = [
-  { path: '/', label: 'Tổng quan', icon: 'overview' },
+  { path: '/', label: 'Trợ lý AI', icon: 'comments' },
+  { path: '/overview', label: 'Tổng quan', icon: 'overview' },
   { path: '/my-work', label: 'Việc của tôi', icon: 'acceptance' },
   { path: '/campaigns', label: 'Chiến dịch', icon: 'campaign' },
-  { path: '/qctt-plans', label: 'Kế hoạch QCTT', icon: 'table' },
+  { path: '/qctt-plans', label: 'Kế hoạch', icon: 'table' },
   { path: '/materials', label: 'Tư liệu', icon: 'material' },
-  { path: '/contracts', label: 'Kênh & Hợp đồng', icon: 'contract' },
+  { path: '/contracts', label: 'Hợp đồng', icon: 'contract' },
   { path: '/bookings', label: 'Đặt chỗ', icon: 'booking' },
+  { path: '/catalogs/qctt', label: 'Danh mục kênh', icon: 'table' },
   { path: '/directory', label: 'Danh bạ', icon: 'users' },
-  { path: '/catalogs/qctt', label: 'Danh mục QCTT', icon: 'table' },
 ] as const;
 
 function isActive(pathname: string, path: string) {
@@ -28,8 +30,9 @@ function isActive(pathname: string, path: string) {
 export function AppShell({ pathname, children }: PropsWithChildren<{ pathname: string }>) {
   const { me, logout, switchDemo, switchAssist } = useAuth();
   const capabilities = useAccessCapabilities();
-  const bookingWorkspaceOnly = !me.directSuperadmin && Boolean(capabilities['booking.read']) && !capabilities['material.read'] && !capabilities['contract.read'];
+  const bookingWorkspaceOnly = !me.directSuperadmin && Boolean(capabilities['booking.read']) && !capabilities['contract.read'];
   const [pendingWork, setPendingWork] = useState(0);
+  const [aiDockWidth, setAiDockWidth] = useState(0);
   const refreshPendingWork = useCallback(async () => {
     try {
       const results=await Promise.allSettled([
@@ -49,7 +52,7 @@ export function AppShell({ pathname, children }: PropsWithChildren<{ pathname: s
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(215,170,56,0.12),_transparent_26%),linear-gradient(180deg,#f8fafc_0%,#edf7f7_100%)]">
       <aside className="fixed inset-y-0 left-0 z-50 flex w-20 flex-col border-r border-slate-200 bg-white lg:w-64">
-        <AppLink className="border-b border-slate-100 px-3 py-5 lg:px-5" to="/" aria-label="Về Tổng quan CPMS">
+        <AppLink className="border-b border-slate-100 px-3 py-5 lg:px-5" to="/" aria-label="Về Trợ lý AI CPMS">
           <div className="hidden overflow-hidden rounded-xl bg-[#086985] lg:block">
             <img className="h-auto w-full" src="/brand/vna-logo-horizontal-blue.png" alt="Vietnam Airlines" />
           </div>
@@ -61,7 +64,7 @@ export function AppShell({ pathname, children }: PropsWithChildren<{ pathname: s
         </AppLink>
 
         <nav className="flex-1 space-y-1 px-2 py-5 lg:px-3" aria-label="Điều hướng chính">
-          {navigation.filter(item=>!bookingWorkspaceOnly||item.path==='/bookings'||item.path==='/campaigns'||item.path==='/qctt-plans'||item.path==='/my-work').filter((item) => item.path === '/materials' ? capabilities['material.read'] : item.path === '/contracts' ? capabilities['contract.read'] : item.path === '/bookings' ? capabilities['booking.read'] : item.path === '/campaigns' ? capabilities['campaign.read'] : true).map((item) => {
+          {navigation.filter(item=>!bookingWorkspaceOnly||item.path==='/'||item.path==='/overview'||item.path==='/materials'||item.path==='/bookings'||item.path==='/campaigns'||item.path==='/qctt-plans'||item.path==='/my-work').filter((item) => item.path === '/contracts' ? capabilities['contract.read'] : item.path === '/bookings' ? capabilities['booking.read'] : item.path === '/campaigns' ? capabilities['campaign.read'] : true).map((item) => {
             const active = isActive(pathname, item.path);
             return (
               <AppLink
@@ -95,7 +98,7 @@ export function AppShell({ pathname, children }: PropsWithChildren<{ pathname: s
         </div>
       </aside>
 
-      <div className="min-h-screen pl-20 lg:pl-64">
+      <div className="cpms-content min-h-screen pl-20 lg:pl-64" style={{ '--ai-dock-width': `${aiDockWidth}px` } as CSSProperties}>
         {me.mode === 'DEMO_IMPERSONATION' && <div role="status" data-cpms-session-banner className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-7 py-3 text-sm text-amber-950">
           <span>Đang trình diễn: <strong>{me.account.displayName}</strong> · Phiên gốc: {me.originalActor.displayName}</span>
           <Button size="sm" variant="secondary" onClick={() => { void switchDemo(null); }}>Trở về superadmin</Button>
@@ -104,7 +107,10 @@ export function AppShell({ pathname, children }: PropsWithChildren<{ pathname: s
           <span>Đang hỗ trợ <strong>{me.account.displayName}</strong> · Người quản trị: {me.originalActor.displayName} · Mọi thao tác được ghi nhận theo cả hai danh tính.</span>
           <Button size="sm" variant="secondary" onClick={() => { void switchAssist(null); }}>Kết thúc hỗ trợ</Button>
         </div>}
-        <main className="w-full px-4 py-6 lg:px-7 lg:py-7">{children}</main>
+        <main className="w-full px-4 py-6 lg:px-7 lg:py-7">
+          {children}
+          <AiAssistant home={pathname === '/'} path={pathname} onDockWidthChange={setAiDockWidth}/>
+        </main>
         <PersonalNotes key={me.account.id}/>
       </div>
     </div>

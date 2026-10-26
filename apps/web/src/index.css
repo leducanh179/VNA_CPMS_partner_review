@@ -20,6 +20,30 @@ body {
   min-height: 100vh;
 }
 
+.cpms-ai-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 85;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #f8fafc, #edf7f7);
+  box-shadow: 0 12px 36px #003f4a24;
+}
+
+.cpms-ai-panel[hidden] { display: none; }
+.cpms-ai-expanded { left: 96px; width: auto; }
+@media (min-width: 1024px) {
+  .cpms-ai-expanded { left: 272px; }
+}
+@media (min-width: 1280px) {
+  .cpms-content { padding-right: var(--ai-dock-width, 0px); }
+}
+
 button,
 a {
   -webkit-tap-highlight-color: transparent;

@@ -6,7 +6,7 @@ import { CampaignInlineTable } from '../components/campaign-inline-table';
 import { CampaignQuickFilters } from '../components/campaign-quick-filters';
 import { CampaignBatchWorkflowActions } from '../components/campaign-batch-workflow-actions';
 import { useAuth } from '../auth-context';
-import { useAccessCapabilities } from '../access-context';
+import { useAccessCapabilities, useFormDraftAccess } from '../access-context';
 import { CampaignCollaborationPanel, type CampaignCollaborationFocusRequest, type CampaignCollaborationTab } from '../components/campaign-collaboration-panel';
 import { CampaignSpreadsheetExchange, type ExchangeTab } from '../components/campaign-spreadsheet-exchange';
 import { selectCockpitCampaigns } from '../lib/campaign-workspace';
@@ -34,6 +34,7 @@ export function CampaignCockpitPage({ notify }: { notify(message: string): void 
   const { store, snapshot } = useCampaignWorkspace();
   const { me } = useAuth();
   const capabilities = useAccessCapabilities();
+  const canOpenForm = useFormDraftAccess('campaign');
   const [listMode, setListMode] = useState<'active' | 'trash'>('active');
   const campaigns = listMode === 'trash' ? snapshot.trashCampaigns : selectCockpitCampaigns(snapshot);
   const [query, setQuery] = useState('');
@@ -51,9 +52,9 @@ export function CampaignCockpitPage({ notify }: { notify(message: string): void 
   const [collaborationFocus, setCollaborationFocus] = useState<CampaignCollaborationFocusRequest | null>(null);
   const [formDrafts, setFormDrafts] = useState<CampaignFormDraftSummary[]>([]);
   const loadFormDrafts = useCallback(() => {
-    if (!capabilities['campaign.create']) return;
+    if (!canOpenForm) return;
     void requestJson<CampaignFormDraftSummary[]>('/campaign-form-drafts').then(setFormDrafts).catch(() => setFormDrafts([]));
-  }, [capabilities]);
+  }, [canOpenForm]);
   useEffect(() => { loadFormDrafts(); }, [loadFormDrafts]);
   const openExchange = (tab: ExchangeTab) => { setExchangeTab(tab); setExchangeOpen(true); };
   const handleSelectionChange = useCallback((ids: string[]) => setSelectedIds((current) => current.join('|') === ids.join('|') ? current : ids), []);
@@ -171,7 +172,7 @@ export function CampaignCockpitPage({ notify }: { notify(message: string): void 
           <Button variant="secondary" disabled={snapshot.loading} onClick={() => { void (listMode === 'trash' ? store.loadTrash() : store.load(true)); loadFormDrafts(); }}>{snapshot.loading ? 'Đang tải…' : 'Làm mới'}</Button>
           {listMode === 'active' ? <Button variant="secondary" className="gap-2" disabled={!capabilities['campaign.export']} onClick={() => openExchange('export')}><CpmsIcon name="export" />Xuất dữ liệu</Button> : null}
           {listMode === 'active' ? <Button variant="secondary" className="gap-2" disabled={!capabilities['campaign.import']} onClick={() => openExchange('import')}><CpmsIcon name="import" />Nhập dữ liệu</Button> : null}
-          {capabilities['campaign.create'] && <AppLink className="inline-flex min-h-10 items-center rounded-xl bg-vna-blue px-4 py-2 text-sm font-semibold text-white transition hover:bg-vna-blue/90" to="/campaigns/new">Tạo chiến dịch mới</AppLink>}
+          {canOpenForm && <AppLink className="inline-flex min-h-10 items-center rounded-xl bg-vna-blue px-4 py-2 text-sm font-semibold text-white transition hover:bg-vna-blue/90" to="/campaigns/new">{me.account.accountKind==='PARTNER_DEMO'?'Thử nhập chiến dịch':'Tạo chiến dịch mới'}</AppLink>}
         </div>
       </div>
 

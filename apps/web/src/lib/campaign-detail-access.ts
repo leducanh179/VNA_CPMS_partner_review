@@ -8,6 +8,6 @@ export function canAccessCampaignApprovalTab(input: { directSuperadmin: boolean;
   return Boolean(input.workflow?.assignments.some((assignment) => !assignment.endsAt && assignment.actorId === input.actorId && ['DEPARTMENT_LEADER', 'DIVISION_LEADER'].includes(assignment.functionalRole)));
 }
 
-export function shouldOpenCampaignApprovalTab(requestedTab: string | null, canSeeApproval: boolean, workflowReady: boolean) {
-  return canSeeApproval && (requestedTab === 'approval' || (requestedTab === null && workflowReady));
+export function shouldOpenCampaignApprovalTab(requestedTab: string | null, canSeeApproval: boolean) {
+  return canSeeApproval && requestedTab === 'approval';
 }

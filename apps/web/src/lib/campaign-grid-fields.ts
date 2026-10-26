@@ -20,6 +20,7 @@ export const CAMPAIGN_GRID_FIELDS = new Set([
   'campaign_level_code', 'requesting_unit', 'requesting_person',
   'campaign_comm_start_date', 'campaign_comm_end_date',
   'campaign_effect_start_date', 'campaign_effect_end_date',
+  'campaign_departure_start_date', 'campaign_departure_end_date',
   'campaign_objective', 'kpi_primary', 'market', 'additional_information',
   'content_pillar_l1_code', 'content_pillar_l2_code',
   'lead_campaign_manager_summary', 'supporting_campaign_managers_summary',

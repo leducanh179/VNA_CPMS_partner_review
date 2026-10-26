@@ -4,15 +4,17 @@ import { CAMPAIGN_LEVEL_CODES, CAMPAIGN_OBJECTIVE_CODES, canonicalCampaignFieldK
 const editableAliases: Record<string, keyof UpdateCampaignCommand> = {
   campaign_name: 'name', campaign_level_code: 'levelCode', campaign_comm_start_date: 'startDate', campaign_comm_end_date: 'endDate',
   campaign_effect_start_date: 'effectiveStartDate', campaign_effect_end_date: 'effectiveEndDate', campaign_objective: 'primaryObjectiveCode', kpi_primary: 'kpiText',
+  campaign_departure_start_date: 'departureStartDate', campaign_departure_end_date: 'departureEndDate',
 };
 const typedToCanonical = Object.fromEntries(Object.entries(editableAliases).map(([key, value]) => [value, key]));
-const dateFields = new Set(['startDate','endDate','effectiveStartDate','effectiveEndDate']);
+const dateFields = new Set(['startDate','endDate','effectiveStartDate','effectiveEndDate','departureStartDate','departureEndDate']);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 export function campaignAccessSnapshot(current: CampaignSummary): Record<string, unknown> {
   return { ...current.fieldValues, id: current.id, campaign_code: current.code, campaign_name: current.name, campaign_lifecycle_state: current.lifecycleState,
     campaign_level_code: current.levelCode, campaign_comm_start_date: current.startDate, campaign_comm_end_date: current.endDate,
     campaign_effect_start_date: current.effectiveStartDate, campaign_effect_end_date: current.effectiveEndDate,
+    campaign_departure_start_date: current.departureStartDate ?? null, campaign_departure_end_date: current.departureEndDate ?? null,
     campaign_objective: current.primaryObjectiveCode, primary_objective_other: current.primaryObjectiveOther, kpi_primary: current.kpiText,
     requesting_unit: current.requestingUnit, requesting_employee_code: current.requestingEmployeeCode, manual_requester_email: current.manualRequesterEmail,
     requesting_units: current.requestingUnits.map((unit) => unit.unitCode ? { unitCode: unit.unitCode } : { customName: unit.customName }),

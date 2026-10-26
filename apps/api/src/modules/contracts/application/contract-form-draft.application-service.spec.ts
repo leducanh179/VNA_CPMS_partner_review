@@ -15,7 +15,7 @@ function setup() {
     save: vi.fn(async () => ({ id, kind: value.kind, title: value.fields.name!, activityCode: null, formData: value, recordVersion: 1, updatedAt: new Date() })),
     remove: vi.fn(async () => false),
   };
-  const access = { run: vi.fn(async (_actor: typeof DEMO_ACTOR, fn: () => Promise<unknown>) => fn()), require: vi.fn() };
+  const access = { run: vi.fn(async (_actor: typeof DEMO_ACTOR, fn: () => Promise<unknown>) => fn()), requireFormDraft: vi.fn() };
   return { service: new ContractFormDraftApplicationService(repository as unknown as ContractFormDraftRepository, access as unknown as AccessApplicationService), repository, access };
 }
 
@@ -26,7 +26,7 @@ describe('private Contract and owned-channel form drafts', () => {
     expect(repository.save).toHaveBeenCalledWith(id, value, 0, DEMO_ACTOR);
     await service.list(DEMO_ACTOR);
     expect(repository.list).toHaveBeenCalledWith(DEMO_ACTOR.id);
-    expect(access.require).toHaveBeenCalledWith('contract.create');
+    expect(access.requireFormDraft).toHaveBeenCalledWith('contract');
   });
 
   it('does not disclose another creator’s draft and rejects malformed input', async () => {

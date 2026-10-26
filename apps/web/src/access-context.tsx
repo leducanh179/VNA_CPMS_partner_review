@@ -1,4 +1,5 @@
 import type { AccessPermission } from '@cpms/domain';
+import { useAuth } from './auth-context';
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 import { requestJson } from './lib/api';
 
@@ -19,3 +20,8 @@ export function AccessCapabilitiesProvider({ children }: PropsWithChildren) {
   return <AccessContext.Provider value={permissions}>{children}</AccessContext.Provider>;
 }
 export function useAccessCapabilities() { return useContext(AccessContext); }
+
+export function useFormDraftAccess(module: 'campaign' | 'contract' | 'material') {
+  const { me } = useAuth(); const permissions = useAccessCapabilities();
+  return permissions[`${module}.create`] === true || me.account.accountKind === 'PARTNER_DEMO' && permissions[`${module}.read`] === true;
+}

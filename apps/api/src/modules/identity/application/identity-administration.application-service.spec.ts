@@ -14,6 +14,20 @@ const direct = (): StoredLocalSession => ({
 });
 
 describe('pilot identity administration', () => {
+  it('creates separate partner demo accounts only through a direct administrator without fake personnel or demo hashes', async () => {
+    const demo = { ...account('partner', ['VIEWER']), accountKind: 'PARTNER_DEMO', personnelEmployeeCode: null, profile: null, employment: null };
+    expect(isLoginAccount(demo)).toBe(true);
+    expect(isLoginAccount({ ...demo, roles: ['ADMIN'] })).toBe(false);
+    expect(isLoginAccount({ ...demo, personnelEmployeeCode: 'TEST123' })).toBe(false);
+    const createPartnerDemos = vi.fn().mockResolvedValue([demo]);
+    const service = new IdentityApplicationService({ createPartnerDemos } as unknown as IdentityRepository);
+    await service.createPartnerDemos(direct(), { emails: ['PARTNER@vietnamairlines.com'], password: 'abcdefgh', reason: 'Synthetic partner access' });
+    expect(createPartnerDemos).toHaveBeenCalledWith('session', [{ email: 'partner@vietnamairlines.com', passwordHash: expect.stringMatching(/^scrypt\$v1\$/) }], 'Synthetic partner access');
+    expect(service.isCurrent({ ...direct(), original: demo, effective: demo })).toBe(true);
+    await expect(service.createPartnerDemos({ ...direct(), mode: 'ADMIN_ASSIST' }, { emails: ['partner@vietnamairlines.com'], password: 'abcdefgh', reason: 'Test' })).rejects.toThrow();
+    await expect(service.createPartnerDemos(direct(), { emails: ['partner@example.test'], password: 'abcdefgh', reason: 'Test' })).rejects.toThrow();
+    await expect(service.createPartnerDemos(direct(), { emails: ['partner@vietnamairlines.com', 'PARTNER@vietnamairlines.com'], password: 'abcdefgh', reason: 'Test' })).rejects.toThrow();
+  });
   it('recognizes a separate pilot admin without inventing a personnel link', () => {
     const pilot = { ...account('pilot', ['ADMIN']), accountKind: 'PILOT_ADMIN', personnelEmployeeCode: null, profile: null, employment: null };
     const session = { ...direct(), original: pilot, effective: pilot };

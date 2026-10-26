@@ -6,20 +6,25 @@ import { CampaignDriveAuthorizationService } from './application/campaign-drive-
 import { CampaignDriveOrchestrationService } from './application/campaign-drive-orchestration.service';
 import { CAMPAIGN_DRIVE_REPOSITORY } from './application/campaign-drive.repository';
 import { PrismaCampaignDriveRepository } from './infrastructure/prisma-campaign-drive.repository';
-import { CampaignDriveController } from './transport/campaign-drive.controller';
+import { CampaignDriveController, CampaignDriveInboxController } from './transport/campaign-drive.controller';
 import { ScopedCampaignDriveApplicationService } from './application/scoped-campaign-drive.application-service';
 import { ScopedDriveAuthorizationService } from './application/scoped-drive-authorization.service';
 import { ScopedDriveOrchestrationService } from './application/scoped-drive-orchestration.service';
 import { CampaignDriveGoogleAccessService } from './application/campaign-drive-google-access.service';
+import { CampaignDriveRelinkApplicationService } from './application/campaign-drive-relink.application-service';
+import { CampaignDriveRelinkRepository } from './application/campaign-drive-relink.repository';
+import { PrismaCampaignDriveRelinkRepository } from './infrastructure/prisma-campaign-drive-relink.repository';
 
 @Module({
   imports: [CampaignCoreModule, GoogleIntegrationModule],
-  controllers: [CampaignDriveController],
+  controllers: [CampaignDriveController, CampaignDriveInboxController],
   providers: [
     ScopedCampaignDriveApplicationService,
     ScopedDriveAuthorizationService,
     ScopedDriveOrchestrationService,
     CampaignDriveGoogleAccessService,
+    CampaignDriveRelinkApplicationService,
+    { provide: CampaignDriveRelinkRepository, useClass: PrismaCampaignDriveRelinkRepository },
     { provide: CampaignDriveApplicationService, useExisting: ScopedCampaignDriveApplicationService },
     { provide: CampaignDriveAuthorizationService, useExisting: ScopedDriveAuthorizationService },
     { provide: CampaignDriveOrchestrationService, useExisting: ScopedDriveOrchestrationService },

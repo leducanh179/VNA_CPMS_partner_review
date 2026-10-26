@@ -19,6 +19,8 @@ export const ACCESS_PERMISSIONS = [
   'access.manage', 'credential.manage', 'system.manage', 'google.connect', 'google.revoke',
 ] as const;
 export type AccessPermission = typeof ACCESS_PERMISSIONS[number];
+/** Partner exploration never confers business writes, even through assignment or an override. */
+export const PARTNER_DEMO_READ_PERMISSIONS = ['campaign.read', 'campaign.journal.read', 'contract.read', 'booking.read', 'material.read'] as const;
 export type AccessModule = 'campaign' | 'material' | 'contract' | 'booking' | 'access' | 'credential' | 'system' | 'google' | 'catalog';
 export type AccessRelation = 'ALL' | 'OWN' | 'OWN_DRAFT' | 'ASSIGNED' | 'UNIT';
 export type AccessScope =
@@ -51,6 +53,7 @@ export interface AccessIdentity {
   profileComplete: boolean;
   mode: 'DIRECT' | 'DEMO_IMPERSONATION' | 'ADMIN_ASSIST';
   effectiveSuperadmin: boolean;
+  readOnlyDemo?: boolean;
   orgIds: readonly string[];
 }
 
@@ -188,12 +191,17 @@ export function evaluateAccess(request: AccessRequest, rules: readonly AccessRul
       (identity.mode === 'DIRECT' && identity.originalActorId !== identity.effectiveActorId)) return result('SESSION_REQUIRED');
   if (!identity.effectiveActive || !identity.originalActive || !identity.profileComplete) return result('ACCOUNT_UNAVAILABLE');
   if (!(ACCESS_PERMISSIONS as readonly string[]).includes(permission)) return result('UNKNOWN_PERMISSION');
+  if (identity.readOnlyDemo && !(PARTNER_DEMO_READ_PERMISSIONS as readonly string[]).includes(permission)) return result('EXPLICIT_DENY');
   if (resource && !resource.exists) return result('NOT_FOUND');
   if (resource?.factsValidUntil !== undefined && (!Number.isFinite(resource.factsValidUntil) || request.now >= resource.factsValidUntil)) return result('INVALID_POLICY');
   const purgeReview = resource?.pendingPurgeReview === true && ['campaign.read','campaign.approve'].includes(permission)
     || resource?.type === 'BOOKING' && resource.pendingBookingRestoreReview === true && ['booking.read','booking.approve'].includes(permission);
   if (resource?.deleted && !trashActions.has(permission) && !purgeReview) return result('TRASHED');
   if (identity.mode !== 'DIRECT' && impersonationBlocked.has(permission)) return result('IMPERSONATION_RESTRICTED');
+  if (identity.readOnlyDemo) {
+    if (!Number.isFinite(request.now) || rules.some(rule => validateAccessRule(rule).length > 0)) return result('INVALID_POLICY');
+    return evaluateRuleTier(request, rules);
+  }
   if (identity.effectiveSuperadmin && identity.mode === 'DIRECT') return result('SUPERADMIN', true);
   if (resource?.type === 'CONTRACT' && !resource.assignedActorIds.includes(identity.effectiveActorId)) return result('DEFAULT_DENY');
   if (adminOnly.has(permission)) return result('DIRECT_ADMIN_REQUIRED');

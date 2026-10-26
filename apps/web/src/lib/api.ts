@@ -22,6 +22,10 @@ import type {
   CampaignDriveFileStatus,
   CampaignDriveUploadResult,
   CampaignDriveWorkspaceView,
+  CampaignDriveEntryItem,
+  CampaignDriveFolderPage,
+  CampaignDriveShortcutTargetStatus,
+  CampaignDriveRelinkRequestView,
   CampaignCommentItem,
   CampaignCommentPage,
   CampaignCommentReactionSummary,
@@ -60,13 +64,17 @@ export interface SystemStatus {
   status: 'ok';
   database: { status: 'connected'; engine: 'postgresql'; runtime: 'DOCKER' | 'EXTERNAL' };
   auth: { mode: 'OPEN_DEMO' | 'LOCAL_SESSION'; actor: ActorContext };
-  ai: { mode: 'OFF' | 'MOCK'; provider: string };
+  ai: { mode: 'OFF' | 'MOCK' | 'OPENAI'; provider: string };
   checkedAt: string;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 export const CAMPAIGN_LIST_PATH = '/campaigns';
 export const MATERIAL_LIST_PATH = '/materials';
+
+export class ApiHttpError extends Error {
+  constructor(readonly status: number, message: string) { super(message); this.name = 'ApiHttpError'; }
+}
 
 interface ApiErrorPayload {
   message?: string | string[];
@@ -94,7 +102,7 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
     const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null;
     const detail = Array.isArray(payload?.message) ? payload.message.join(' ') : payload?.message;
     if (response.status === 401 && !path.startsWith('/auth/')) signalSessionExpired();
-    throw new Error(detail || `API request failed (${response.status}).`);
+    throw new ApiHttpError(response.status, detail || `API request failed (${response.status}).`);
   }
   const payload = await response.json() as T;
   if (epoch !== currentIdentityEpoch()) throw new DOMException('Phiên đã thay đổi.', 'AbortError');
@@ -246,6 +254,9 @@ export interface ExistingCampaignDriveFolderPreview {
   currentName: string;
   expectedName: string;
   willRename: boolean;
+  replacingFolderId: string | null;
+  replacingFolderName: string | null;
+  childFolderRenames: Array<{ folderId: string; currentName: string; expectedName: string }>;
 }
 
 export function previewExistingCampaignDriveFolder(campaignId: string, folderUrl: string) {
@@ -256,12 +267,139 @@ export function previewExistingCampaignDriveFolder(campaignId: string, folderUrl
 
 export function adoptExistingCampaignDriveFolder(campaignId: string, preview: ExistingCampaignDriveFolderPreview) {
   return requestJson<CampaignDriveWorkspaceView>(`${CAMPAIGN_LIST_PATH}/${encodeURIComponent(campaignId)}/drive-workspace/existing-folder/adopt`, {
-    method: 'POST', body: JSON.stringify({ folderUrl: preview.folderUrl, expectedCurrentName: preview.currentName, confirmRename: true }),
+    method: 'POST', body: JSON.stringify({ folderUrl: preview.folderUrl, expectedCurrentName: preview.currentName, confirmRename: true, ...(preview.replacingFolderId ? { expectedPreviousFolderId: preview.replacingFolderId } : {}) }),
   });
 }
 
 export function syncCampaignDriveWorkspaceName(campaignId: string) {
   return requestJson<CampaignDriveWorkspaceView>(`${CAMPAIGN_LIST_PATH}/${encodeURIComponent(campaignId)}/drive-workspace/sync-name`, { method: 'POST' });
+}
+
+export interface CampaignDriveRelinkPreview {
+  folderId: string;
+  folderUrl: string;
+  currentName: string;
+  expectedName: string;
+  replacingFolderId: string;
+  replacingFolderLink: string;
+  replacingFolderName: string | null;
+}
+
+function drivePath(campaignId: string) { return `${CAMPAIGN_LIST_PATH}/${encodeURIComponent(campaignId)}/drive-workspace`; }
+
+export function previewCampaignDriveRelink(campaignId: string, folderUrl: string) {
+  return requestJson<CampaignDriveRelinkPreview>(`${drivePath(campaignId)}/relink-requests/preview`, { method: 'POST', body: JSON.stringify({ folderUrl }) });
+}
+
+export function requestCampaignDriveRelink(campaignId: string, preview: CampaignDriveRelinkPreview, reason: string) {
+  return requestJson<CampaignDriveRelinkRequestView>(`${drivePath(campaignId)}/relink-requests`, { method: 'POST',
+    body: JSON.stringify({ folderUrl: preview.folderUrl, expectedCurrentName: preview.currentName,
+      expectedPreviousFolderId: preview.replacingFolderId, confirmRename: true, reason }) });
+}
+
+export function listCampaignDriveRelinks(campaignId: string) {
+  return requestJson<{ requests: CampaignDriveRelinkRequestView[]; canRequest: boolean; canDecide: boolean; actorId: string }>(`${drivePath(campaignId)}/relink-requests`);
+}
+
+export function decideCampaignDriveRelink(campaignId: string, requestId: string, approve: boolean, reason: string, expectedVersion: number) {
+  return requestJson<CampaignDriveRelinkRequestView>(`${drivePath(campaignId)}/relink-requests/${encodeURIComponent(requestId)}/decision`, {
+    method: 'POST', body: JSON.stringify({ approve, reason, expectedVersion }),
+  });
+}
+
+export function retryCampaignDriveRelink(campaignId: string, requestId: string) {
+  return requestJson<CampaignDriveRelinkRequestView>(`${drivePath(campaignId)}/relink-requests/${encodeURIComponent(requestId)}/retry`, { method: 'POST' });
+}
+
+export function withdrawCampaignDriveRelink(campaignId: string, requestId: string) {
+  return requestJson<CampaignDriveRelinkRequestView>(`${drivePath(campaignId)}/relink-requests/${encodeURIComponent(requestId)}/withdraw`, { method: 'POST' });
+}
+
+export function browseCampaignDriveFolder(campaignId: string, folderId: string | null, status: CampaignDriveFileStatus, pageToken?: string,
+  sortBy: 'NAME' | 'UPDATED' | 'SIZE' = 'NAME', direction: 'ASC' | 'DESC' = 'ASC') {
+  const parameters = new URLSearchParams({ status, sortBy, direction });
+  if (folderId) parameters.set('folderId', folderId);
+  if (pageToken) parameters.set('pageToken', pageToken);
+  return requestJson<CampaignDriveFolderPage>(`${drivePath(campaignId)}/entries?${parameters.toString()}`);
+}
+
+export function getCampaignDriveShortcutTargetStatus(campaignId: string, itemId: string) {
+  return requestJson<{ status: CampaignDriveShortcutTargetStatus }>(`${drivePath(campaignId)}/entries/${encodeURIComponent(itemId)}/shortcut-target`);
+}
+
+export async function downloadCampaignDriveEntries(campaignId: string, folderId: string, itemIds: string[]) {
+  if (identityTransitionInProgress()) throw new Error('Đang thay đổi phiên CPMS.');
+  const epoch = currentIdentityEpoch();
+  const controller = new AbortController();
+  const untrack = trackIdentityRequest(controller);
+  try {
+    const response = await fetch(`${API_BASE_URL}${drivePath(campaignId)}/entries/download`, {
+      method: 'POST', credentials: 'include', cache: 'no-store', signal: controller.signal,
+      headers: { Accept: 'application/octet-stream, application/zip', 'Content-Type': 'application/json', 'x-cpms-csrf': csrfHeader() },
+      body: JSON.stringify({ folderId, itemIds }),
+    });
+    if (epoch !== currentIdentityEpoch()) throw new DOMException('Phiên đã thay đổi.', 'AbortError');
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as ApiErrorPayload | null;
+      if (response.status === 401) signalSessionExpired();
+      throw new Error((Array.isArray(payload?.message) ? payload.message.join(' ') : payload?.message) || `Không thể tải xuống (${response.status}).`);
+    }
+    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(response.headers.get('Content-Disposition') ?? '')?.[1];
+    const filename = encodedName ? decodeURIComponent(encodedName) : 'tai-lieu';
+    const blob = await response.blob();
+    if (epoch !== currentIdentityEpoch()) throw new DOMException('Phiên đã thay đổi.', 'AbortError');
+    return { filename, blob };
+  } finally { untrack(); }
+}
+
+export function createCampaignDriveFolder(campaignId: string, folderId: string, name: string) {
+  return requestJson<CampaignDriveEntryItem>(`${drivePath(campaignId)}/entries/folders`, { method: 'POST', body: JSON.stringify({ folderId, name }) });
+}
+
+export function renameCampaignDriveEntry(campaignId: string, itemId: string, name: string) {
+  return requestJson<CampaignDriveEntryItem>(`${drivePath(campaignId)}/entries/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+}
+
+export interface CampaignDriveFolderSharing {
+  folderId: string;
+  folderName: string;
+  link: string;
+  googleCanShare: boolean;
+  canManage: boolean;
+  limitedAccess: boolean;
+  canLimitAccess: boolean;
+  permissions: Array<{ id: string; type: string; role: string; emailAddress: string | null; displayName: string | null;
+    allowFileDiscovery: boolean | null; inherited: boolean; inheritedRole?: string | null; directRole?: string | null }>;
+}
+
+const folderPermissionPath = (campaignId: string, itemId: string) => `${drivePath(campaignId)}/entries/${encodeURIComponent(itemId)}/permissions`;
+export function getCampaignDriveFolderSharing(campaignId: string, itemId: string) {
+  return requestJson<CampaignDriveFolderSharing>(folderPermissionPath(campaignId, itemId));
+}
+export function setCampaignDriveGeneralAccess(campaignId: string, itemId: string,
+  access: 'RESTRICTED' | 'ANYONE', role: 'reader' | 'commenter' | 'writer', confirmLimitInheritedAccess: boolean) {
+  return requestJson<CampaignDriveFolderSharing>(`${folderPermissionPath(campaignId, itemId)}/general`,
+    { method: 'PUT', body: JSON.stringify({ access, role, confirmLimitInheritedAccess }) });
+}
+export function addCampaignDriveFolderPermission(campaignId: string, itemId: string,
+  input: { type: 'user' | 'anyone'; role: 'reader' | 'commenter' | 'writer'; emailAddress?: string }) {
+  return requestJson<CampaignDriveFolderSharing>(folderPermissionPath(campaignId, itemId), { method: 'POST', body: JSON.stringify(input) });
+}
+export function updateCampaignDriveFolderPermission(campaignId: string, itemId: string, permissionId: string,
+  role: 'reader' | 'commenter' | 'writer') {
+  return requestJson<CampaignDriveFolderSharing>(`${folderPermissionPath(campaignId, itemId)}/${encodeURIComponent(permissionId)}`,
+    { method: 'PATCH', body: JSON.stringify({ role }) });
+}
+export function removeCampaignDriveFolderPermission(campaignId: string, itemId: string, permissionId: string) {
+  return requestJson<CampaignDriveFolderSharing>(`${folderPermissionPath(campaignId, itemId)}/${encodeURIComponent(permissionId)}`, { method: 'DELETE' });
+}
+
+export function trashCampaignDriveEntry(campaignId: string, itemId: string) {
+  return requestJson<CampaignDriveEntryItem>(`${drivePath(campaignId)}/entries/${encodeURIComponent(itemId)}/trash`, { method: 'POST' });
+}
+
+export function restoreCampaignDriveEntry(campaignId: string, itemId: string) {
+  return requestJson<CampaignDriveEntryItem>(`${drivePath(campaignId)}/entries/${encodeURIComponent(itemId)}/restore`, { method: 'POST' });
 }
 
 export function listCampaignDriveFiles(campaignId: string, folderKind: CampaignDriveFolderKey, status: CampaignDriveFileStatus, pageToken?: string) {
@@ -284,17 +422,18 @@ export function restoreCampaignDriveFile(campaignId: string, fileId: string) {
 
 export function uploadCampaignDriveFile(
   campaignId: string,
-  folderKey: CampaignDriveFolderKey,
+  folderId: string,
   file: File,
   onProgress: (percent: number) => void,
+  uploadId: string,
 ) {
   if (identityTransitionInProgress()) throw new Error('Đang thay đổi phiên CPMS.');
   const epoch = currentIdentityEpoch();
   const request = new XMLHttpRequest();
   const untrack = trackIdentityUpload(request);
   request.addEventListener('loadend', untrack);
-  const promise = new Promise<CampaignDriveUploadResult>((resolve, reject) => {
-    request.open('POST', `${API_BASE_URL}${CAMPAIGN_LIST_PATH}/${encodeURIComponent(campaignId)}/drive-workspace/uploads`);
+  const promise = new Promise<{ file: CampaignDriveEntryItem; uploadMode: CampaignDriveUploadResult['uploadMode'] }>((resolve, reject) => {
+    request.open('POST', `${API_BASE_URL}${CAMPAIGN_LIST_PATH}/${encodeURIComponent(campaignId)}/drive-workspace/entries/uploads`);
     request.withCredentials = true;
     request.setRequestHeader('Accept', 'application/json');
     request.setRequestHeader('x-cpms-csrf', csrfHeader());
@@ -304,21 +443,33 @@ export function uploadCampaignDriveFile(
     request.addEventListener('load', () => {
       if (epoch !== currentIdentityEpoch()) { reject(new DOMException('Phiên đã thay đổi.', 'AbortError')); return; }
       if (request.status === 401) signalSessionExpired();
-      const payload = (() => { try { return JSON.parse(request.responseText) as ApiErrorPayload & CampaignDriveUploadResult; } catch { return null; } })();
-      if (request.status >= 200 && request.status < 300 && payload) resolve(payload as CampaignDriveUploadResult);
+      const payload = (() => { try { return JSON.parse(request.responseText) as ApiErrorPayload & { file: CampaignDriveEntryItem; uploadMode: CampaignDriveUploadResult['uploadMode'] }; } catch { return null; } })();
+      if (request.status >= 200 && request.status < 300 && payload) resolve(payload as { file: CampaignDriveEntryItem; uploadMode: CampaignDriveUploadResult['uploadMode'] });
       else {
         const detail = Array.isArray(payload?.message) ? payload.message.join(' ') : payload?.message;
-        reject(new Error(detail || `API request failed (${request.status}).`));
+        reject(new CampaignDriveUploadError(detail || `Không thể xác nhận lượt tải lên (${request.status}).`, request.status));
       }
     });
-    request.addEventListener('error', () => reject(new Error('Mất kết nối khi tải file lên Google Drive.')));
+    request.addEventListener('error', () => reject(new CampaignDriveUploadError('Mất kết nối khi tải file lên Google Drive.', 0)));
     request.addEventListener('abort', () => reject(new DOMException('Đã hủy tải file.', 'AbortError')));
     const body = new FormData();
-    body.append('folderKey', folderKey);
+    body.append('folderId', folderId);
+    body.append('uploadId', uploadId);
     body.append('file', file, file.name);
     request.send(body);
   });
   return { promise, cancel: () => request.abort() };
+}
+
+export class CampaignDriveUploadError extends Error {
+  constructor(message: string, public readonly status: number) { super(message); }
+  get uncertain() { return this.status === 0 || this.status === 524 || this.status >= 500; }
+}
+
+export function getCampaignDriveUploadStatus(campaignId: string, folderId: string, uploadId: string) {
+  const query = new URLSearchParams({ folderId });
+  return requestJson<{ completed: boolean; file: CampaignDriveEntryItem | null }>(
+    `${drivePath(campaignId)}/entries/uploads/${encodeURIComponent(uploadId)}/status?${query}`);
 }
 
 export function disconnectGoogleIntegration() {

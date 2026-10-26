@@ -38,14 +38,13 @@ export class PrismaBookingRepository extends BookingRepository {
   async allocationAccess() { return wire<BookingAllocationAccess[]>(await this.db.bookingAllocationAccess.findMany()); }
   async templates(ids?:string[]) { return wire<BookingTemplate[]>(await this.db.bookingReportTemplate.findMany({where:ids?{contractId:{in:ids}}:{},orderBy:{version:'desc'}})); }
   async catalog() {
-    const [people,departments,campaigns,materials]=await Promise.all([
+    const [people,departments,campaigns]=await Promise.all([
       this.db.actor.findMany({where:{isActive:true},select:{id:true,displayName:true,loginEmail:true}}),
       this.db.employmentOrgUnit.findMany({where:{isActive:true},select:{id:true,sourceName:true}}),
       this.db.campaign.findMany({where:{deletedAt:null},select:{id:true,code:true,name:true,lifecycleState:true,startDate:true,endDate:true},orderBy:{updatedAt:'desc'},take:10000}),
-      this.db.materialRecord.findMany({where:{isDeleted:false},select:{id:true,materialId:true,data:true},take:10000}),
     ]);
     return {people:people.map(p=>({id:p.id,name:p.displayName,email:p.loginEmail})),departments:departments.map(d=>({id:d.id,name:d.sourceName})),
-      campaigns:campaigns.map(c=>({id:c.id,code:c.code,name:c.name,status:c.lifecycleState,startDate:c.startDate?.toISOString().slice(0,10)??null,endDate:c.endDate?.toISOString().slice(0,10)??null})),materials:materials.map(m=>{const d=m.data as Record<string,unknown>;return{id:m.id,name:String(d.material_name??m.materialId),url:typeof d.material_link==='string'?d.material_link:null};})};
+      campaigns:campaigns.map(c=>({id:c.id,code:c.code,name:c.name,status:c.lifecycleState,startDate:c.startDate?.toISOString().slice(0,10)??null,endDate:c.endDate?.toISOString().slice(0,10)??null})),materials:[]};
   }
   private async audit(actor:ActorContext,action:string,id:string,data:unknown) {
     await this.db.auditEvent.create({data:{actorId:actor.id,originalActorId:actor.session?.originalActorId??actor.id,contextMode:actor.session?.mode??'DIRECT',action,entityType:'booking',entityId:id,payload:json(data)}});

@@ -15,6 +15,19 @@ function summary(record: PersistMaterialRecord): MaterialSummary {
 }
 
 describe('MaterialApplicationService', () => {
+  it('replays a lost creation response for the same actor/client key without creating or auditing twice', async () => {
+    const material = summary({ materialId: 'MTR-202610-A2C9T8', fields: { material_link: 'https://example.test', material_name: 'Original' }, recordVersion: 1, isDeleted: false, createdBy: 'test', updatedBy: 'test' });
+    const repository: MaterialRepository = { list: vi.fn(async () => []), findByMaterialIds: vi.fn(async () => []), listReferences: vi.fn(async () => []), purge: vi.fn(),
+      findCreationReceipts: vi.fn(async () => [{ clientKey: 'stable', material }]), saveBatch: vi.fn(async () => []) };
+    const result = await new MaterialApplicationService(repository).batchSave([{ clientKey: 'stable', fields: { material_name: 'Newer local input' } }], DEMO_ACTOR);
+    expect(result.items[0]).toMatchObject({ ok: true, replayed: true, material });
+    expect(repository.findCreationReceipts).toHaveBeenCalledWith(['stable'], DEMO_ACTOR); expect(repository.saveBatch).not.toHaveBeenCalled();
+  });
+  it('does not recreate a missing saved row as a new record', async () => {
+    const repository: MaterialRepository = { list: vi.fn(async () => []), findByMaterialIds: vi.fn(async () => []), listReferences: vi.fn(async () => []), purge: vi.fn(), saveBatch: vi.fn(async () => []) };
+    const result = await new MaterialApplicationService(repository).batchSave([{ clientKey: 'missing', materialId: 'MTR-missing', expectedVersion: 2, fields: { material_link: 'https://example.test' } }], DEMO_ACTOR);
+    expect(result.failed).toBe(1); expect(repository.saveBatch).not.toHaveBeenCalled();
+  });
   it('keeps temporary campaign names local and inherits markets from the selected campaign with most markets', async () => {
     const stored = new Map<string, MaterialSummary>();
     const repository: MaterialRepository = {

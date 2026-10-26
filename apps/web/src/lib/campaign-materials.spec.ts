@@ -17,5 +17,6 @@ describe('materialsForCampaign', () => {
     ];
     expect(materialsForCampaign(materials, { id: 'c1', code: 'C1', name: 'One' }).map((material) => material.materialId)).toEqual(['both', 'pending', 'legacy']);
     expect(materialsForCampaign(materials, { id: 'c2', code: 'C2', name: 'Two' }).map((material) => material.materialId)).toEqual(['both', 'pending']);
+    expect(materialsForCampaign(materials, { id: 'c1', code: 'C1', name: 'One' }, true).map((material) => material.materialId)).toEqual(['both', 'pending', 'deleted', 'legacy']);
   });
 });

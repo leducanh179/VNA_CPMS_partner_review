@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:cpms:ai:lookup-context:2",
+  "title": "CPMS explicit context v2",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "record"
+      ],
+      "properties": {
+        "type": {
+          "const": "RECORD"
+        },
+        "record": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "CAMPAIGN",
+                "MATERIAL",
+                "CONTRACT",
+                "BOOKING"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "text",
+        "label"
+      ],
+      "properties": {
+        "type": {
+          "const": "CELL"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "fieldKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "record": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "CAMPAIGN",
+                "MATERIAL",
+                "CONTRACT",
+                "BOOKING"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        }
+      }
+    }
+  ]
+}

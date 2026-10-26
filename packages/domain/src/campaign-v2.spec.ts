@@ -3,9 +3,9 @@ import { CAMPAIGN_FIELD_DEFINITIONS } from './campaign-fields';
 import { validateCampaignRichText } from './campaign';
 
 describe('Campaign V2 domain contracts', () => {
-  it('keeps the complete 87-field compatibility registry with explicit statuses', () => {
-    expect(CAMPAIGN_FIELD_DEFINITIONS).toHaveLength(87);
-    expect(new Set(CAMPAIGN_FIELD_DEFINITIONS.map((field) => field.key)).size).toBe(87);
+  it('keeps the complete 89-field compatibility registry with explicit statuses', () => {
+    expect(CAMPAIGN_FIELD_DEFINITIONS).toHaveLength(89);
+    expect(new Set(CAMPAIGN_FIELD_DEFINITIONS.map((field) => field.key)).size).toBe(89);
     expect(new Set(CAMPAIGN_FIELD_DEFINITIONS.map((field) => field.status))).toEqual(
       new Set(['ACTIVE_V2', 'COMPATIBILITY', 'INACTIVE', 'DEPRECATED']),
     );

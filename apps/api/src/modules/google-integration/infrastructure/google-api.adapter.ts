@@ -58,6 +58,12 @@ async function executeJson<T>(url: string, init: RequestInit, retryReads: boolea
           await waitBeforeRetry(attempt, response);
           continue;
         }
+        // Report setup errors accurately without exposing Google's response or credentials.
+        if (response.status === 403) {
+          const details = await response.json().catch(() => null) as { error?: { details?: Array<{ reason?: string; metadata?: { service?: string } }> } } | null;
+          if (details?.error?.details?.some(item => item.reason === 'SERVICE_DISABLED' && item.metadata?.service === 'sheets.googleapis.com'))
+            throw new GoogleProviderError('PROVIDER', 'Google Sheets API chưa được bật trong dự án Google Cloud của CPMS. Quản trị viên cần bật API rồi đồng bộ lại.');
+        }
         throw providerError(response.status, init.method?.toUpperCase() ?? 'GET');
       }
       const text = await response.text();
@@ -75,8 +81,8 @@ async function executeJson<T>(url: string, init: RequestInit, retryReads: boolea
   throw new GoogleProviderError('NETWORK', 'Không thể kết nối Google API.');
 }
 
-async function guardedFetch(url: string, init: RequestInit, timeoutMs = 15_000): Promise<Response> {
-  try { return await googleEgress.fetch(url, init, timeoutMs); }
+async function guardedFetch(url: string, init: RequestInit, timeoutMs = 15_000, maxResponseBytes?: number): Promise<Response> {
+  try { return await googleEgress.fetch(url, init, timeoutMs, maxResponseBytes); }
   catch (error) {
     if (error instanceof GoogleEgressLimitError) throw new GoogleProviderError('RATE_LIMIT', error.message);
     if (error instanceof GoogleEgressResponseLimitError) throw new GoogleProviderError('LIMIT', error.message);
@@ -94,7 +100,7 @@ async function waitBeforeRetry(attempt: number, response?: Response) {
 
 function bearer(accessToken: string) { return { Authorization: `Bearer ${accessToken}` }; }
 
-const DRIVE_ITEM_FIELDS = 'id,name,mimeType,driveId,parents,trashed,trashedTime,trashingUser(displayName),size,modifiedTime,webViewLink,webContentLink,lastModifyingUser(displayName),capabilities(canEdit,canTrash,canUntrash,canMoveItemWithinDrive,canDownload,canAddChildren,canShare)';
+const DRIVE_ITEM_FIELDS = 'id,name,mimeType,driveId,parents,trashed,trashedTime,trashingUser(displayName),size,modifiedTime,webViewLink,webContentLink,appProperties,inheritedPermissionsDisabled,shortcutDetails(targetId,targetMimeType,targetResourceKey),lastModifyingUser(displayName),capabilities(canEdit,canTrash,canUntrash,canMoveItemWithinDrive,canDownload,canAddChildren,canShare,canDisableInheritedPermissions,canEnableInheritedPermissions)';
 
 interface RawDriveItem {
   id?: string;
@@ -109,6 +115,9 @@ interface RawDriveItem {
   modifiedTime?: string;
   webViewLink?: string;
   webContentLink?: string;
+  shortcutDetails?: { targetId?: string; targetMimeType?: string; targetResourceKey?: string };
+  appProperties?: Record<string, string>;
+  inheritedPermissionsDisabled?: boolean;
   lastModifyingUser?: { displayName?: string };
   capabilities?: Partial<CloudDriveItem['capabilities']>;
 }
@@ -130,6 +139,11 @@ function toDriveItem(value: RawDriveItem): CloudDriveItem {
     trashedBy: value.trashingUser?.displayName?.trim() || null,
     webViewLink: value.webViewLink ?? null,
     webContentLink: value.webContentLink ?? null,
+    shortcutDetails: value.mimeType === 'application/vnd.google-apps.shortcut' && value.shortcutDetails?.targetId
+      ? { targetId: value.shortcutDetails.targetId, targetMimeType: value.shortcutDetails.targetMimeType ?? null,
+        targetResourceKey: value.shortcutDetails.targetResourceKey ?? null } : null,
+    uploadId: value.appProperties?.cpmsUploadId ?? null,
+    inheritedPermissionsDisabled: Boolean(value.inheritedPermissionsDisabled),
     capabilities: {
       canEdit: Boolean(value.capabilities?.canEdit),
       canTrash: Boolean(value.capabilities?.canTrash),
@@ -138,6 +152,8 @@ function toDriveItem(value: RawDriveItem): CloudDriveItem {
       canDownload: Boolean(value.capabilities?.canDownload),
       canAddChildren: Boolean(value.capabilities?.canAddChildren),
       canShare: Boolean(value.capabilities?.canShare),
+      canDisableInheritedPermissions: Boolean(value.capabilities?.canDisableInheritedPermissions),
+      canEnableInheritedPermissions: Boolean(value.capabilities?.canEnableInheritedPermissions),
     },
   };
 }
@@ -237,11 +253,37 @@ export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, Cl
     };
   }
 
-  async readTab(accessToken: string, spreadsheetId: string, tabTitle: string): Promise<TabularSheetData> {
+  async readTab(accessToken: string, spreadsheetId: string, tabTitle: string, options?: { purpose: 'AI_LIBRARY' }): Promise<TabularSheetData> {
     const metadata = await this.metadata(accessToken, spreadsheetId);
     const tab = metadata.tabs.find((candidate) => candidate.title === tabTitle);
     if (!tab) throw new GoogleProviderError('NOT_FOUND', 'Không tìm thấy tab nguồn đã chọn.');
     if (tab.rowCount > 50_000 || tab.columnCount > 200) throw new GoogleProviderError('LIMIT', 'Tab nguồn vượt giới hạn an toàn 50.000 dòng hoặc 200 cột.');
+    if (options?.purpose === 'AI_LIBRARY') {
+      // Read the entire allocated range, including blank gaps, with a bounded look-ahead.
+      // A later nonempty row must never be silently dropped from the replacement index.
+      if (tabTitle !== 'DriveIndex' || tab.rowCount > 10_002 || tab.columnCount !== 27)
+        throw new GoogleProviderError('LIMIT', 'DriveIndex chỉ hỗ trợ tối đa 10.000 dòng dữ liệu và đúng 27 cột.');
+      const rows: TabularSheetData['rows'] = [];
+      let bytes = 0;
+      for (let start = 1; start <= tab.rowCount; start += 500) {
+        const end = Math.min(start + 499, tab.rowCount);
+        const range = `'DriveIndex'!A${start}:AA${end}`;
+        const page = await requestJson<{ values?: unknown[][] }>(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`,
+          { method: 'GET', headers: bearer(accessToken) }, true,
+        );
+        const values = page.values ?? [];
+        bytes += Buffer.byteLength(JSON.stringify(values), 'utf8');
+        if (values.length > end - start + 1 || values.some(row => !Array.isArray(row) || row.length > 27) || bytes > 16_000_000)
+          throw new GoogleProviderError('LIMIT', 'DriveIndex vượt giới hạn đồng bộ an toàn; chỉ mục cũ được giữ nguyên.');
+        for (let offset = 0; offset <= end - start; offset++) {
+          rows.push((values[offset] ?? []).map(cell => typeof cell === 'string' || typeof cell === 'number' || typeof cell === 'boolean' || cell === null ? cell : String(cell)));
+        }
+      }
+      while (rows.length && rows.at(-1)!.every(cell => !String(cell ?? '').trim())) rows.pop();
+      if (rows.length > 10_001) throw new GoogleProviderError('LIMIT', 'DriveIndex vượt 10.000 dòng dữ liệu; chỉ mục cũ được giữ nguyên.');
+      return { name: tabTitle, rows };
+    }
     const quoted = `'${tabTitle.replaceAll("'", "''")}'!A1:CV${MAX_ROWS + 3}`;
     const value = await requestJson<{ values?: unknown[][] }>(
       `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(quoted)}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`,
@@ -288,10 +330,10 @@ export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, Cl
     return { sheetId: target.sheetId, title: target.title };
   }
 
-  async getItem(accessToken: string, fileId: string): Promise<CloudDriveItem> {
+  async getItem(accessToken: string, fileId: string, resourceKey?: string): Promise<CloudDriveItem> {
     const value = await requestJson<RawDriveItem>(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=${encodeURIComponent(DRIVE_ITEM_FIELDS)}`,
-      { method: 'GET', headers: bearer(accessToken) },
+      { method: 'GET', headers: { ...bearer(accessToken), ...(resourceKey ? { 'X-Goog-Drive-Resource-Keys': `${fileId}/${resourceKey}` } : {}) } },
       true,
     );
     return toDriveItem(value);
@@ -367,38 +409,77 @@ export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, Cl
     return toDriveItem(value);
   }
 
-  async listFiles(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; trashed: boolean; pageSize: number; pageToken?: string }): Promise<CloudDrivePage> {
+  async listFiles(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; trashed: boolean; pageSize: number; pageToken?: string; orderBy?: string; uploadId?: string }): Promise<CloudDrivePage> {
     const parameters = new URLSearchParams({
-      q: `${driveQueryLiteral(input.parentFolderId)} in parents and trashed = ${input.trashed ? 'true' : 'false'}`,
+      q: `${driveQueryLiteral(input.parentFolderId)} in parents and trashed = ${input.trashed ? 'true' : 'false'}${input.uploadId ? ` and appProperties has { key='cpmsUploadId' and value=${driveQueryLiteral(input.uploadId)} }` : ''}`,
       corpora: 'drive',
       driveId: input.sharedDriveId,
       includeItemsFromAllDrives: 'true',
       supportsAllDrives: 'true',
       pageSize: String(input.pageSize),
-      orderBy: 'folder,name_natural',
+      orderBy: input.orderBy ?? 'folder,name_natural',
       fields: `nextPageToken,files(${DRIVE_ITEM_FIELDS})`,
     });
     if (input.pageToken) parameters.set('pageToken', input.pageToken);
-    const value = await requestJson<{ nextPageToken?: string; files?: RawDriveItem[] }>(
+    const readPage = () => requestJson<{ nextPageToken?: string; files?: RawDriveItem[] }>(
       `https://www.googleapis.com/drive/v3/files?${parameters.toString()}`,
       { method: 'GET', headers: bearer(input.accessToken) },
       true,
     );
+    let value: { nextPageToken?: string; files?: RawDriveItem[] };
+    try {
+      value = await readPage();
+    } catch (error) {
+      if (!(error instanceof GoogleProviderError) || error.code !== 'FORBIDDEN') throw error;
+      // A link-shared folder can be readable without membership in the entire Shared Drive.
+      // Keep the parent predicate, but search only files visible to this account.
+      parameters.set('corpora', 'user');
+      parameters.delete('driveId');
+      value = await readPage();
+    }
     return { items: (value.files ?? []).map(toDriveItem), nextPageToken: value.nextPageToken ?? null };
   }
 
+  async downloadFile(input: { accessToken: string; fileId: string; maxBytes: number; exportMimeType?: string }): Promise<Uint8Array> {
+    const url = input.exportMimeType
+      ? `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(input.fileId)}/export?mimeType=${encodeURIComponent(input.exportMimeType)}`
+      : `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(input.fileId)}?alt=media&supportsAllDrives=true`;
+    const response = await guardedFetch(url, { method: 'GET', headers: bearer(input.accessToken) }, 60_000, input.maxBytes);
+    if (!response.ok) throw providerError(response.status, 'GET');
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
   async listPermissions(accessToken: string, fileId: string): Promise<CloudDrivePermission[]> {
-    const value = await requestJson<{ permissions?: Array<{ id?: string; type?: string; role?: string; allowFileDiscovery?: boolean; permissionDetails?: Array<{ inherited?: boolean }> }> }>(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/permissions?supportsAllDrives=true&fields=${encodeURIComponent('permissions(id,type,role,allowFileDiscovery,permissionDetails(inherited))')}`,
-      { method: 'GET', headers: bearer(accessToken) },
-      true,
-    );
-    return (value.permissions ?? []).flatMap((permission) => permission.id && permission.type && permission.role ? [{
+    type RawPermission = { id?: string; type?: string; role?: string; emailAddress?: string; displayName?: string;
+      allowFileDiscovery?: boolean; permissionDetails?: Array<{ inherited?: boolean; role?: string }> };
+    const all: RawPermission[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const parameters = new URLSearchParams({ supportsAllDrives: 'true', pageSize: '100',
+        fields: 'nextPageToken,permissions(id,type,role,emailAddress,displayName,allowFileDiscovery,permissionDetails(inherited,role))' });
+      if (pageToken) parameters.set('pageToken', pageToken);
+      const value = await requestJson<{ permissions?: RawPermission[]; nextPageToken?: string }>(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/permissions?${parameters}`,
+        { method: 'GET', headers: bearer(accessToken) }, true);
+      all.push(...(value.permissions ?? []));
+      pageToken = value.nextPageToken;
+      if (!pageToken) break;
+      if (page === 9) throw new GoogleProviderError('LIMIT', 'Danh sách chia sẻ quá dài; hãy quản lý quyền trên Google Drive.');
+    }
+    return all.flatMap((permission) => permission.id && permission.type && permission.role ? [{
       id: permission.id,
       type: permission.type,
       role: permission.role,
+      emailAddress: permission.emailAddress ?? null,
+      displayName: permission.displayName ?? null,
       allowFileDiscovery: typeof permission.allowFileDiscovery === 'boolean' ? permission.allowFileDiscovery : null,
-      inherited: Boolean(permission.permissionDetails?.some((detail) => detail.inherited)),
+      inherited: Boolean(permission.permissionDetails?.length && permission.permissionDetails.every((detail) => detail.inherited)),
+      inheritedRole: permission.permissionDetails?.find((detail) => detail.inherited)?.role ??
+        (permission.permissionDetails?.some((detail) => detail.inherited) ? permission.role : null),
+      directRole: permission.permissionDetails?.length
+        ? permission.permissionDetails.find((detail) => !detail.inherited)?.role ??
+          (permission.permissionDetails.some((detail) => !detail.inherited) ? permission.role : null)
+        : permission.role,
     }] : []);
   }
 
@@ -412,16 +493,53 @@ export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, Cl
       },
     );
     if (!value.id || !value.type || !value.role) throw new GoogleProviderError('PROVIDER', 'Google không xác nhận quyền link-writer vừa tạo.');
-    return { id: value.id, type: value.type, role: value.role, allowFileDiscovery: value.allowFileDiscovery ?? null, inherited: false };
+    return { id: value.id, type: value.type, role: value.role, emailAddress: null, displayName: null, allowFileDiscovery: value.allowFileDiscovery ?? null, inherited: false };
   }
 
-  async upload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array; resumableThresholdBytes: number }): Promise<CloudDriveUpload> {
+  async createPermission(input: { accessToken: string; fileId: string; type: 'user' | 'anyone'; role: 'reader' | 'commenter' | 'writer'; emailAddress?: string }): Promise<CloudDrivePermission> {
+    const value = await requestJson<{ id?: string; type?: string; role?: string; emailAddress?: string; displayName?: string; allowFileDiscovery?: boolean }>(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(input.fileId)}/permissions?supportsAllDrives=true&sendNotificationEmail=false&fields=id,type,role,emailAddress,displayName,allowFileDiscovery`,
+      { method: 'POST', headers: { ...bearer(input.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: input.type, role: input.role, ...(input.type === 'user' ? { emailAddress: input.emailAddress } : { allowFileDiscovery: false }) }) },
+    );
+    if (!value.id || !value.type || !value.role) throw new GoogleProviderError('PROVIDER', 'Google chưa xác nhận quyền vừa tạo.');
+    return { id: value.id, type: value.type, role: value.role, emailAddress: value.emailAddress ?? null,
+      displayName: value.displayName ?? null, allowFileDiscovery: value.allowFileDiscovery ?? null, inherited: false };
+  }
+
+  async updatePermission(input: { accessToken: string; fileId: string; permissionId: string; role: 'reader' | 'commenter' | 'writer' }): Promise<CloudDrivePermission> {
+    const value = await requestJson<{ id?: string; type?: string; role?: string; emailAddress?: string; displayName?: string; allowFileDiscovery?: boolean }>(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(input.fileId)}/permissions/${encodeURIComponent(input.permissionId)}?supportsAllDrives=true&fields=id,type,role,emailAddress,displayName,allowFileDiscovery`,
+      { method: 'PATCH', headers: { ...bearer(input.accessToken), 'Content-Type': 'application/json' }, body: JSON.stringify({ role: input.role }) },
+    );
+    if (!value.id || !value.type || !value.role) throw new GoogleProviderError('PROVIDER', 'Google chưa xác nhận quyền vừa cập nhật.');
+    return { id: value.id, type: value.type, role: value.role, emailAddress: value.emailAddress ?? null,
+      displayName: value.displayName ?? null, allowFileDiscovery: value.allowFileDiscovery ?? null, inherited: false };
+  }
+
+  async deletePermission(input: { accessToken: string; fileId: string; permissionId: string }): Promise<void> {
+    const response = await guardedFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(input.fileId)}/permissions/${encodeURIComponent(input.permissionId)}?supportsAllDrives=true`,
+      { method: 'DELETE', headers: bearer(input.accessToken) });
+    if (!response.ok) throw providerError(response.status, 'DELETE');
+  }
+
+  async setInheritedPermissionsDisabled(input: { accessToken: string; fileId: string; disabled: boolean }): Promise<CloudDriveItem> {
+    const value = await requestJson<RawDriveItem>(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(input.fileId)}?supportsAllDrives=true&fields=${encodeURIComponent(DRIVE_ITEM_FIELDS)}`,
+      { method: 'PATCH', headers: { ...bearer(input.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inheritedPermissionsDisabled: input.disabled }) },
+    );
+    return toDriveItem(value);
+  }
+
+  async upload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array; resumableThresholdBytes: number; uploadId?: string }): Promise<CloudDriveUpload> {
     return input.content.byteLength >= input.resumableThresholdBytes ? this.resumableUpload(input) : this.multipartUpload(input);
   }
 
-  private async multipartUpload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array }): Promise<CloudDriveUpload> {
+  private async multipartUpload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array; uploadId?: string }): Promise<CloudDriveUpload> {
     const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify({ name: input.name, parents: [input.parentFolderId] })], { type: 'application/json; charset=UTF-8' }));
+    form.append('metadata', new Blob([JSON.stringify({ name: input.name, parents: [input.parentFolderId],
+      ...(input.uploadId ? { appProperties: { cpmsUploadId: input.uploadId } } : {}) })], { type: 'application/json; charset=UTF-8' }));
     form.append('file', new Blob([Buffer.from(input.content)], { type: input.mimeType }), input.name);
     const value = await requestJson<RawDriveItem>(
       `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=${encodeURIComponent(DRIVE_ITEM_FIELDS)}`,
@@ -432,7 +550,7 @@ export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, Cl
     return { item, mode: 'MULTIPART' };
   }
 
-  private async resumableUpload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array }): Promise<CloudDriveUpload> {
+  private async resumableUpload(input: { accessToken: string; sharedDriveId: string; parentFolderId: string; name: string; mimeType: string; content: Uint8Array; uploadId?: string }): Promise<CloudDriveUpload> {
     const start = await guardedFetch(
       `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=${encodeURIComponent(DRIVE_ITEM_FIELDS)}`,
       {
@@ -443,7 +561,8 @@ export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, Cl
           'X-Upload-Content-Type': input.mimeType,
           'X-Upload-Content-Length': String(input.content.byteLength),
         },
-        body: JSON.stringify({ name: input.name, parents: [input.parentFolderId] }),
+        body: JSON.stringify({ name: input.name, parents: [input.parentFolderId],
+          ...(input.uploadId ? { appProperties: { cpmsUploadId: input.uploadId } } : {}) }),
       },
     );
     if (!start.ok) throw providerError(start.status, 'POST');

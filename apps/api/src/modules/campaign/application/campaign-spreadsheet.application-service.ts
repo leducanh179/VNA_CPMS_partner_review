@@ -41,10 +41,14 @@ const MAX_FILE_BYTES = 6_000_000;
 const MAX_IMPORT_ROWS = 1_000;
 const FIELD_BY_KEY = new Map(CAMPAIGN_SPREADSHEET_FIELDS.map((field) => [field.key, field]));
 const FIELD_BY_LABEL = new Map(CAMPAIGN_SPREADSHEET_FIELDS.map((field) => [field.label.trim().toLocaleLowerCase('vi'), field]));
+// Older templates used the shorter effective-period labels; keep their import mapping.
+FIELD_BY_LABEL.set('bắt đầu hiệu lực', FIELD_BY_KEY.get('campaign_effect_start_date')!);
+FIELD_BY_LABEL.set('kết thúc hiệu lực', FIELD_BY_KEY.get('campaign_effect_end_date')!);
 const GRID_TO_EXCHANGE: Readonly<Record<string, CampaignSpreadsheetFieldKey>> = {
   campaign_code: 'campaign_code', campaign_name: 'campaign_name', campaign_level_code: 'campaign_level_code',
   campaign_lifecycle_state: 'campaign_lifecycle_state', campaign_effect_start_date: 'campaign_effect_start_date',
   campaign_effect_end_date: 'campaign_effect_end_date', campaign_comm_start_date: 'campaign_comm_start_date',
+  campaign_departure_start_date: 'campaign_departure_start_date', campaign_departure_end_date: 'campaign_departure_end_date',
   campaign_comm_end_date: 'campaign_comm_end_date', campaign_objective: 'primary_objective_code',
   kpi_primary: 'kpi_text', content_pillar_l1_code: 'content_pillar_l1_code', content_pillar_l2_code: 'content_pillar_l2_code',
   market: 'market_codes', requesting_unit: 'requesting_unit_codes', requesting_person: 'requesting_employee_code',
@@ -365,7 +369,8 @@ export class CampaignSpreadsheetApplicationService {
     if (lifecycle && !(CAMPAIGN_LIFECYCLE_STATES as readonly string[]).includes(lifecycle)) errors.push('Trạng thái chiến dịch không hợp lệ.');
     for (const [startKey, endKey, label] of [
       ['campaign_comm_start_date', 'campaign_comm_end_date', 'Thời gian QCTT'],
-      ['campaign_effect_start_date', 'campaign_effect_end_date', 'Thời gian hiệu lực'],
+      ['campaign_effect_start_date', 'campaign_effect_end_date', 'Thời gian hiệu lực chương trình/xuất vé'],
+      ['campaign_departure_start_date', 'campaign_departure_end_date', 'Thời gian hiệu lực khởi hành'],
     ] as const) {
       const start = nullableText(values[startKey]); const end = nullableText(values[endKey]);
       if (start && !isDate(start)) errors.push(`${label}: ngày bắt đầu phải theo YYYY-MM-DD.`);
@@ -415,6 +420,7 @@ export class CampaignSpreadsheetApplicationService {
     return {
       ...(code ? { code } : {}), ...(name ? { name } : {}), levelCode, ...(lifecycleState ? { lifecycleState } : {}),
       effectiveStartDate: nullableText(values.campaign_effect_start_date), effectiveEndDate: nullableText(values.campaign_effect_end_date),
+      departureStartDate: nullableText(values.campaign_departure_start_date), departureEndDate: nullableText(values.campaign_departure_end_date),
       startDate: nullableText(values.campaign_comm_start_date), endDate: nullableText(values.campaign_comm_end_date),
       primaryObjectiveCode,
       primaryObjectiveOther: nullableText(values.primary_objective_other), kpiText: nullableText(values.kpi_text),
@@ -447,6 +453,7 @@ export class CampaignSpreadsheetApplicationService {
     };
     assign('name', 'name', 'campaign_name'); assign('levelCode', 'levelCode', 'campaign_level_code'); assign('lifecycleState', 'lifecycleState', 'campaign_lifecycle_state');
     assign('effectiveStartDate', 'effectiveStartDate', 'campaign_effect_start_date'); assign('effectiveEndDate', 'effectiveEndDate', 'campaign_effect_end_date');
+    assign('departureStartDate', 'departureStartDate', 'campaign_departure_start_date'); assign('departureEndDate', 'departureEndDate', 'campaign_departure_end_date');
     assign('startDate', 'startDate', 'campaign_comm_start_date'); assign('endDate', 'endDate', 'campaign_comm_end_date');
     assign('primaryObjectiveCode', 'primaryObjectiveCode', 'primary_objective_code'); assign('primaryObjectiveOther', 'primaryObjectiveOther', 'primary_objective_other');
     assign('kpiText', 'kpiText', 'kpi_text'); assign('descriptionRichText', 'descriptionRichText', 'description_rich_text_json');
@@ -488,6 +495,7 @@ export class CampaignSpreadsheetApplicationService {
       case 'campaign_code': return campaign.code; case 'campaign_name': return campaign.name; case 'campaign_level_code': return campaign.levelCode;
       case 'campaign_lifecycle_state': return campaign.lifecycleState; case 'campaign_effect_start_date': return campaign.effectiveStartDate;
       case 'campaign_effect_end_date': return campaign.effectiveEndDate; case 'campaign_comm_start_date': return campaign.startDate; case 'campaign_comm_end_date': return campaign.endDate;
+      case 'campaign_departure_start_date': return campaign.departureStartDate ?? null; case 'campaign_departure_end_date': return campaign.departureEndDate ?? null;
       case 'primary_objective_code': return campaign.primaryObjectiveCode; case 'primary_objective_other': return campaign.primaryObjectiveOther; case 'kpi_text': return campaign.kpiText;
       case 'description_plain_text': return richTextPlainText(campaign); case 'description_rich_text_json': return campaign.descriptionRichText ? JSON.stringify(campaign.descriptionRichText) : null;
       case 'content_pillar_l1_code': return text(campaign.fieldValues.content_pillar_l1_code) || null; case 'content_pillar_l2_code': return text(campaign.fieldValues.content_pillar_l2_code) || null;

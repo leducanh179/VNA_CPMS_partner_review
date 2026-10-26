@@ -8,6 +8,7 @@ import { MaterialCollaborationApplicationService } from '../application/material
 import { BatchSaveMaterialsDto } from './batch-save-materials.dto';
 import { BulkMaterialActionDto } from './bulk-material-action.dto';
 import { CreateMaterialCommentDto, UpdateMaterialCommentDto } from './material-comment.dto';
+import { MaterialSharingApplicationService } from '../application/material-sharing.application-service';
 
 const materialDtoPipe = (expectedType: new () => object) => new ValidationPipe({
   expectedType,
@@ -20,21 +21,27 @@ const materialDtoPipe = (expectedType: new () => object) => new ValidationPipe({
 @Controller('materials')
 export class MaterialController {
   constructor(@Inject(MaterialApplicationService) private readonly materials: MaterialApplicationService,
+    @Inject(MaterialSharingApplicationService) private readonly sharing: MaterialSharingApplicationService,
     @Inject(MaterialCollaborationApplicationService) private readonly collaboration: MaterialCollaborationApplicationService) {}
 
   @Get()
-  @RequirePermission('material.read')
   @ApiOperation({ summary: 'List up to 5,000 material records' })
   list(@Query('trash') trash?: string) {
     return this.materials.list(trash === 'true');
   }
 
   @Get('bootstrap')
-  @RequirePermission('material.read')
   @ApiOperation({ summary: 'Load Material Portal options, users and role rules' })
   bootstrap() {
     return this.materials.bootstrap();
   }
+
+  @Get('sharing-directory')
+  directory(@Query('q') q?: string, @Query('materialId') materialId?: string) { return this.sharing.directory(q || '', materialId); }
+  @Get(':id')
+  detail(@Param('id') id: string) { return this.sharing.detail(id); }
+  @Patch(':id/sharing')
+  changeSharing(@Param('id') id: string, @Body() input: unknown, @CurrentActor() actor: ActorContext) { return this.sharing.change(id, input, actor); }
 
   @Post('batch-save')
   @ApiBody({ type: BatchSaveMaterialsDto })
@@ -59,11 +66,9 @@ export class MaterialController {
   }
 
   @Get(':id/comments')
-  @RequirePermission('material.read')
   comments(@Param('id') id: string) { return this.collaboration.comments(id); }
 
   @Get(':id/journal')
-  @RequirePermission('material.read')
   journal(@Param('id') id: string) { return this.collaboration.journal(id); }
 
   @Post(':id/comments')

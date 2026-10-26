@@ -14,8 +14,10 @@ export const CAMPAIGN_SPREADSHEET_FIELDS = [
   { key: 'campaign_name', label: 'Tên chiến dịch', type: 'text', importable: true },
   { key: 'campaign_level_code', label: 'Cấp chiến dịch', type: 'code', importable: true },
   { key: 'campaign_lifecycle_state', label: 'Trạng thái chiến dịch', type: 'code', importable: true },
-  { key: 'campaign_effect_start_date', label: 'Bắt đầu hiệu lực', type: 'date', importable: true },
-  { key: 'campaign_effect_end_date', label: 'Kết thúc hiệu lực', type: 'date', importable: true },
+  { key: 'campaign_effect_start_date', label: 'Bắt đầu hiệu lực chương trình/xuất vé', type: 'date', importable: true },
+  { key: 'campaign_effect_end_date', label: 'Kết thúc hiệu lực chương trình/xuất vé', type: 'date', importable: true },
+  { key: 'campaign_departure_start_date', label: 'Bắt đầu hiệu lực khởi hành', type: 'date', importable: true },
+  { key: 'campaign_departure_end_date', label: 'Kết thúc hiệu lực khởi hành', type: 'date', importable: true },
   { key: 'campaign_comm_start_date', label: 'Bắt đầu QCTT', type: 'date', importable: true },
   { key: 'campaign_comm_end_date', label: 'Kết thúc QCTT', type: 'date', importable: true },
   { key: 'primary_objective_code', label: 'Mã mục tiêu chính', type: 'code', importable: true },
@@ -141,6 +143,8 @@ export interface CampaignSpreadsheetTypedRow {
   lifecycleState?: CampaignLifecycleState;
   effectiveStartDate?: string | null;
   effectiveEndDate?: string | null;
+  departureStartDate?: string | null;
+  departureEndDate?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   primaryObjectiveCode?: CampaignObjectiveCode | null;

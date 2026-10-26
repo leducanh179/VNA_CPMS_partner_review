@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AccessApplicationService } from '../../access/application/access.application-service';
 import { MaterialCollaborationApplicationService } from './material-collaboration.application-service';
 import type { MaterialCollaborationRepository } from './material-collaboration.repository';
+import type { MaterialSharingApplicationService } from './material-sharing.application-service';
 
 const comment: MaterialCommentItem = {
   id: 'comment-1', materialId: 'MAT-1', authorActorId: DEMO_ACTOR.id, authorName: 'Demo', body: 'Nội dung',
@@ -22,15 +23,16 @@ function setup(exists = true) {
     updateComment: vi.fn(async () => comment),
     deleteComment: vi.fn(async () => comment),
   };
-  return { service: new MaterialCollaborationApplicationService(repository, access), repository, access };
+  const sharing = { get: vi.fn(async () => ({})) } as unknown as MaterialSharingApplicationService;
+  return { service: new MaterialCollaborationApplicationService(repository, access, sharing), repository, access, sharing };
 }
 
 describe('MaterialCollaborationApplicationService', () => {
   it('reads material comments and requires material permission', async () => {
-    const { service, repository, access } = setup();
+    const { service, repository, sharing } = setup();
     expect(await service.comments('MAT-1')).toEqual([comment]);
     expect(repository.listComments).toHaveBeenCalledWith('MAT-1');
-    expect(access.require).toHaveBeenCalledWith('material.read');
+    expect(sharing.get).toHaveBeenCalledWith('MAT-1');
   });
 
   it('rejects comments for a missing material and empty content', async () => {

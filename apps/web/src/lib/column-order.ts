@@ -12,6 +12,20 @@ export function moveOrderedItem<T>(items: readonly T[], source: T, target: T): T
 
 export type ColumnDropPosition = 'before' | 'after';
 
+/** Old sheet layouts did not distinguish default pins from deliberate user choices. */
+export function manualColumnPins<T extends { pinned: string[]; pinningVersion?: number }>(layout: T): T {
+  return layout.pinningVersion === 1 ? layout : { ...layout, pinned: [], pinningVersion: 1 };
+}
+
+/** Pinning brings a column forward; unpinning keeps its current displayed position. */
+export function toggleManualColumnPin<T extends { order: string[]; pinned: string[] }>(layout: T, key: string, keys: string[]): T {
+  const order = [...new Set([...layout.order, ...keys])].filter(value => keys.includes(value));
+  if (layout.pinned.includes(key)) return { ...layout, order, pinned: layout.pinned.filter(value => value !== key) };
+  if (!keys.includes(key) || layout.pinned.length >= 3) return layout;
+  const pinned = [...layout.pinned, key];
+  return { ...layout, pinned, order: [...order.filter(value => pinned.includes(value)), ...order.filter(value => !pinned.includes(value))] };
+}
+
 export function moveOrderedItemAt<T>(
   items: readonly T[],
   source: T,

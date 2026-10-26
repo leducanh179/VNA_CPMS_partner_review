@@ -7,14 +7,24 @@ import type { RequestWithActor } from './request-with-actor';
 import { IdentityApplicationService, LOCAL_SESSION_COOKIE } from '../identity/application/identity.application-service';
 import { isCookieMutationTrusted } from '../identity/application/local-auth-security';
 import { AccessApplicationService } from '../access/application/access.application-service';
+import { partnerDemoRequestAllowed } from '../identity/application/partner-demo-security';
+import { isPublicMaterialRead, PublicMaterialRateLimit } from './public-material-read';
 
 @Injectable()
 export class DemoActorMiddleware {
+  private readonly publicMaterialLimit = new PublicMaterialRateLimit();
   constructor(@Inject(ConfigService) private readonly config: ConfigService<Environment, true>,
     @Inject(IdentityApplicationService) private readonly identity: IdentityApplicationService,
     @Inject(AccessApplicationService) private readonly access: AccessApplicationService) {}
 
   async use(request: RequestWithActor, response: Response, next: NextFunction) {
+    if (isPublicMaterialRead(request.method, request.originalUrl.split('?')[0] ?? '')) {
+      response.setHeader('Cache-Control', 'no-store');
+      if (!this.publicMaterialLimit.allow(request.ip || request.socket.remoteAddress || 'unknown')) {
+        response.setHeader('Retry-After', '60'); response.status(429).json({ message: 'Vui lòng thử lại sau.' }); return;
+      }
+      next(); return;
+    }
     const authMode = this.config.get('AUTH_MODE', { infer: true });
     if (authMode === 'LOCAL_SESSION') {
       response.setHeader('Cache-Control', 'no-store');
@@ -30,6 +40,7 @@ export class DemoActorMiddleware {
       if (!isCookieMutationTrusted({ kind: 'SESSION', method: request.method, origin: request.get('origin'), configuredOrigin,
         csrfToken: request.get('x-cpms-csrf'), sessionCsrfHash: session.csrfHash })) throw new ForbiddenException('Phiên bảo vệ CSRF không hợp lệ. Hãy tải lại trang.');
       if (session.original.credential?.mustChangePassword && !['/api/auth/me', '/api/auth/change-password', '/api/auth/logout'].includes(route ?? '')) throw new ForbiddenException('Hãy đổi mật khẩu CPMS trước khi tiếp tục.');
+      if (session.effective.accountKind === 'PARTNER_DEMO' && !partnerDemoRequestAllowed(request.method, route ?? '')) throw new ForbiddenException('Tài khoản demo chỉ được xem và nhập bản nháp riêng; không thay đổi dữ liệu nghiệp vụ.');
       request.localSession = session;
       request.actor = this.identity.actor(session);
       this.access.withRequestActor(request.actor, next); return;

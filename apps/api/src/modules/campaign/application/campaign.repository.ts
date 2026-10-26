@@ -35,6 +35,8 @@ export interface CampaignFields {
   endDate: Date | null;
   effectiveStartDate: Date | null;
   effectiveEndDate: Date | null;
+  departureStartDate?: Date | null;
+  departureEndDate?: Date | null;
   levelCode: CampaignLevelCode | null;
   requestingEmployeeCode: string | null;
   manualRequesterEmail: string | null;

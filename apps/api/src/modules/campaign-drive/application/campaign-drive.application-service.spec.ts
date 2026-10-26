@@ -1,6 +1,8 @@
 import { DEMO_ACTOR, type ActorContext, type CampaignDriveSyncStatus, type CampaignSummary } from '@cpms/domain';
 import type { CloudDriveItem, CloudDrivePermission, CloudDrivePort } from '@cpms/integrations';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
+import JSZip from 'jszip';
 import type { Environment } from '../../../config/environment';
 import type { CampaignApplicationService } from '../../campaign/application/campaign.application-service';
 import type { GoogleIntegrationApplicationService } from '../../google-integration/application/google-integration.application-service';
@@ -11,6 +13,7 @@ import type { CampaignDriveRepository, CampaignDriveWorkspaceRecord } from './ca
 const SHARED_DRIVE_ID = 'example-shared-drive-id';
 const PARENT_FOLDER_ID = 'example-parent-folder-id';
 const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
+const SHORTCUT_MIME_TYPE = 'application/vnd.google-apps.shortcut';
 
 const campaign: CampaignSummary = {
   id: '10000000-0000-4000-8000-000000000001',
@@ -62,6 +65,7 @@ function driveItem(id: string, name: string, parentId: string, overrides: Partia
     lastModifiedBy: 'QA Google',
     webViewLink: `https://drive.google.com/open?id=${id}`,
     webContentLink: null,
+    shortcutDetails: null,
     capabilities: { canEdit: true, canTrash: true, canUntrash: true, canMoveItemWithinDrive: true, canDownload: true, canAddChildren: true, canShare: true },
     ...overrides,
   };
@@ -88,17 +92,24 @@ class FakeGoogle {
 
 class FakeDrive implements CloudDrivePort {
   items = new Map<string, CloudDriveItem>();
+  constructor() { this.items.set(PARENT_FOLDER_ID, driveItem(PARENT_FOLDER_ID, 'DATABASE_CAMPAIGNS', SHARED_DRIVE_ID)); }
   createdNames: string[] = [];
   permissions = new Map<string, CloudDrivePermission[]>();
+  limitedFolders: string[] = [];
   trashCalls: Array<{ id: string; trashed: boolean }> = [];
   moveCalls: Array<{ id: string; fromParentIds: string[]; toParentId: string }> = [];
   restoreToWrongParentId: string | null = null;
   uploadParents: string[] = [];
   uploadNames: string[] = [];
   renameNames: string[] = [];
+  downloadCalls: string[] = [];
+  resourceKeyReads: Array<{ fileId: string; resourceKey?: string }> = [];
+  orderByCalls: string[] = [];
+  content = new Map<string, Uint8Array>();
   nextId = 1;
 
-  async getItem(_accessToken: string, fileId: string) {
+  async getItem(_accessToken: string, fileId: string, resourceKey?: string) {
+    this.resourceKeyReads.push({ fileId, resourceKey });
     const item = this.items.get(fileId);
     if (!item) throw new Error('missing');
     return structuredClone(item);
@@ -139,21 +150,52 @@ class FakeDrive implements CloudDrivePort {
     this.moveCalls.push({ id: item.id, fromParentIds: input.fromParentIds, toParentId: input.toParentId });
     return structuredClone(moved);
   }
-  async listFiles(input: { parentFolderId: string; trashed: boolean; pageToken?: string }) {
-    const all = [...this.items.values()].filter((item) => item.mimeType !== FOLDER_MIME_TYPE && item.trashed === input.trashed && item.parents.includes(input.parentFolderId));
+  async listFiles(input: { parentFolderId: string; trashed: boolean; pageToken?: string; pageSize: number; orderBy?: string; uploadId?: string }) {
+    if (input.orderBy) this.orderByCalls.push(input.orderBy);
+    const all = [...this.items.values()].filter((item) => item.trashed === input.trashed && item.parents.includes(input.parentFolderId) &&
+      (!input.uploadId || item.uploadId === input.uploadId));
     const start = input.pageToken ? Number(input.pageToken) : 0;
-    return { items: all.slice(start, start + 1).map((item) => structuredClone(item)), nextPageToken: start + 1 < all.length ? String(start + 1) : null };
+    return { items: all.slice(start, start + input.pageSize).map((item) => structuredClone(item)), nextPageToken: start + input.pageSize < all.length ? String(start + input.pageSize) : null };
+  }
+  async downloadFile(input: { fileId: string; maxBytes: number }) {
+    this.downloadCalls.push(input.fileId);
+    const bytes = this.content.get(input.fileId) ?? Buffer.from(input.fileId);
+    if (bytes.byteLength > input.maxBytes) throw new Error('limit');
+    return bytes;
   }
   async listPermissions(_accessToken: string, fileId: string) { return structuredClone(this.permissions.get(fileId) ?? []); }
+  async setInheritedPermissionsDisabled(input: { fileId: string; disabled: boolean }) {
+    const item = await this.getItem('', input.fileId);
+    const updated = { ...item, inheritedPermissionsDisabled: input.disabled };
+    this.items.set(input.fileId, updated);
+    this.limitedFolders.push(input.fileId);
+    return structuredClone(updated);
+  }
   async createLinkWriterPermission(_accessToken: string, fileId: string) {
-    const permission: CloudDrivePermission = { id: `permission-${fileId}`, type: 'anyone', role: 'writer', allowFileDiscovery: false, inherited: false };
+    const permission: CloudDrivePermission = { id: `permission-${fileId}`, type: 'anyone', role: 'writer', emailAddress: null, displayName: null,
+      allowFileDiscovery: false, inherited: false };
     this.permissions.set(fileId, [permission]);
     return permission;
   }
-  async upload(input: { parentFolderId: string; name: string; mimeType: string; content: Uint8Array; resumableThresholdBytes: number }) {
+  async createPermission(input: { fileId: string; type: 'user' | 'anyone'; role: 'reader' | 'commenter' | 'writer'; emailAddress?: string }) {
+    const permission: CloudDrivePermission = { id: `permission-${this.nextId++}`, type: input.type, role: input.role,
+      emailAddress: input.emailAddress ?? null, displayName: null, allowFileDiscovery: false, inherited: false };
+    this.permissions.set(input.fileId, [...(this.permissions.get(input.fileId) ?? []), permission]);
+    return permission;
+  }
+  async updatePermission(input: { fileId: string; permissionId: string; role: 'reader' | 'commenter' | 'writer' }) {
+    const next = (this.permissions.get(input.fileId) ?? []).map((permission) => permission.id === input.permissionId ? { ...permission, role: input.role } : permission);
+    this.permissions.set(input.fileId, next);
+    return next.find((permission) => permission.id === input.permissionId)!;
+  }
+  async deletePermission(input: { fileId: string; permissionId: string }) {
+    this.permissions.set(input.fileId, (this.permissions.get(input.fileId) ?? []).filter((permission) => permission.id !== input.permissionId));
+  }
+  async upload(input: { parentFolderId: string; name: string; mimeType: string; content: Uint8Array; resumableThresholdBytes: number; uploadId?: string }) {
     this.uploadParents.push(input.parentFolderId);
     this.uploadNames.push(input.name);
-    const item = driveItem(`drive-file-${this.nextId++}`, input.name, input.parentFolderId, { mimeType: input.mimeType, size: input.content.byteLength });
+    const item = driveItem(`drive-file-${this.nextId++}`, input.name, input.parentFolderId, { mimeType: input.mimeType, size: input.content.byteLength,
+      uploadId: input.uploadId ?? null });
     this.items.set(item.id, item);
     return { item, mode: input.content.byteLength >= input.resumableThresholdBytes ? 'RESUMABLE' as const : 'MULTIPART' as const };
   }
@@ -183,6 +225,138 @@ function services(customCampaign: CampaignSummary = campaign) {
 }
 
 describe('CampaignDriveApplicationService', () => {
+  it('identifies shortcuts, checks a target without exposing its ID, and trashes only the shortcut', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const rootId = repository.workspace!.campaignFolderId!;
+    const target = driveItem('shortcut-target-file', 'Mục gốc.pdf', PARENT_FOLDER_ID, { mimeType: 'application/pdf' });
+    const shortcut = driveItem('campaign-shortcut-01', 'Lối tắt mục gốc', rootId, {
+      mimeType: SHORTCUT_MIME_TYPE,
+      shortcutDetails: { targetId: target.id, targetMimeType: target.mimeType, targetResourceKey: 'resource-key' },
+    });
+    drive.items.set(target.id, target);
+    drive.items.set(shortcut.id, shortcut);
+
+    const listing = await service.listFolder(campaign.id, rootId, 'ACTIVE', undefined, DEMO_ACTOR);
+    const entry = listing.items.find((item) => item.id === shortcut.id)!;
+    expect(entry).toMatchObject({ isShortcut: true, isFolder: false, shortcutTargetMimeType: 'application/pdf' });
+    expect(JSON.stringify(entry)).not.toContain(target.id);
+    expect(JSON.stringify(entry)).not.toContain('resource-key');
+    expect(await service.shortcutTargetStatus(campaign.id, shortcut.id, DEMO_ACTOR)).toEqual({ status: 'ACTIVE' });
+    expect(drive.resourceKeyReads.at(-1)).toEqual({ fileId: target.id, resourceKey: 'resource-key' });
+    await expect(service.downloadEntries(campaign.id, rootId, [shortcut.id], DEMO_ACTOR)).rejects.toThrow('Không thể tải lối tắt');
+    expect(drive.downloadCalls).toHaveLength(0);
+
+    await service.trashEntry(campaign.id, shortcut.id, DEMO_ACTOR);
+    expect(drive.trashCalls.at(-1)).toEqual({ id: shortcut.id, trashed: true });
+    expect(drive.items.get(target.id)?.trashed).toBe(false);
+    expect(repository.audits.at(-1)?.payload).toMatchObject({ itemId: shortcut.id, isShortcut: true });
+  });
+
+  it('distinguishes a trashed shortcut target from an unavailable one and rejects out-of-scope probes', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const rootId = repository.workspace!.campaignFolderId!;
+    const target = driveItem('shortcut-target-trashed', 'Đã bỏ.pdf', PARENT_FOLDER_ID, { mimeType: 'application/pdf', trashed: true });
+    const shortcut = driveItem('campaign-shortcut-02', 'Lối tắt đã hỏng', rootId, {
+      mimeType: SHORTCUT_MIME_TYPE,
+      shortcutDetails: { targetId: target.id, targetMimeType: target.mimeType, targetResourceKey: null },
+    });
+    const outside = driveItem('outside-shortcut-01', 'Ngoài Chiến dịch', PARENT_FOLDER_ID, {
+      mimeType: SHORTCUT_MIME_TYPE, shortcutDetails: shortcut.shortcutDetails,
+    });
+    for (const item of [target, shortcut, outside]) drive.items.set(item.id, item);
+    expect(await service.shortcutTargetStatus(campaign.id, shortcut.id, DEMO_ACTOR)).toEqual({ status: 'TRASHED' });
+    await expect(service.shortcutTargetStatus(campaign.id, outside.id, DEMO_ACTOR)).rejects.toBeInstanceOf(ForbiddenException);
+    drive.items.delete(target.id);
+    drive.getItem = async (_token, fileId) => {
+      const item = drive.items.get(fileId);
+      if (!item) throw new NotFoundException('missing');
+      return structuredClone(item);
+    };
+    expect(await service.shortcutTargetStatus(campaign.id, shortcut.id, DEMO_ACTOR)).toEqual({ status: 'UNAVAILABLE' });
+  });
+
+  it('downloads an original file or a complete ZIP of selected nested folders without mutating Drive', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const rootId = repository.workspace!.campaignFolderId!;
+    const folder = driveItem('selected-folder-0001', 'Tư liệu thêm', rootId);
+    const subfolder = driveItem('nested-folder-00001', 'Ảnh', folder.id);
+    const nestedFile = driveItem('nested-file-000001', 'Ảnh.png', subfolder.id, { mimeType: 'image/png', size: 3 });
+    const rootFile = driveItem('root-file-00000001', 'Thông báo.pdf', rootId, { mimeType: 'application/pdf', size: 3 });
+    for (const item of [folder, subfolder, nestedFile, rootFile]) drive.items.set(item.id, item);
+    drive.content.set(nestedFile.id, Buffer.from('PNG'));
+    drive.content.set(rootFile.id, Buffer.from('PDF'));
+    const single = await service.downloadEntries(campaign.id, rootId, [rootFile.id], DEMO_ACTOR);
+    expect(single).toMatchObject({ filename: 'Thông báo.pdf', mimeType: 'application/pdf' });
+    expect(single.content.toString()).toBe('PDF');
+    const archive = await service.downloadEntries(campaign.id, rootId, [folder.id, rootFile.id], DEMO_ACTOR);
+    const zip = await JSZip.loadAsync(archive.content);
+    expect(archive.mimeType).toBe('application/zip');
+    expect((await zip.file('Tư liệu thêm/Ảnh/Ảnh.png')!.async('string'))).toBe('PNG');
+    expect((await zip.file('Thông báo.pdf')!.async('string'))).toBe('PDF');
+    expect(drive.trashCalls).toHaveLength(0);
+    expect(drive.downloadCalls).toEqual([rootFile.id, nestedFile.id, rootFile.id]);
+  });
+
+  it('rejects out-of-folder, trashed and non-downloadable selections before returning a ZIP', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const rootId = repository.workspace!.campaignFolderId!;
+    const outside = driveItem('outside-file-000001', 'Ngoài.pdf', PARENT_FOLDER_ID, { mimeType: 'application/pdf' });
+    const blocked = driveItem('blocked-file-00001', 'Không cho tải.pdf', rootId, { mimeType: 'application/pdf', capabilities: { ...outside.capabilities, canDownload: false } });
+    const trashed = driveItem('trashed-file-00001', 'Đã xóa.pdf', rootId, { mimeType: 'application/pdf', trashed: true });
+    for (const item of [outside, blocked, trashed]) drive.items.set(item.id, item);
+    await expect(service.downloadEntries(campaign.id, rootId, [outside.id], DEMO_ACTOR)).rejects.toThrow('thư mục Chiến dịch đang mở');
+    await expect(service.downloadEntries(campaign.id, rootId, [blocked.id], DEMO_ACTOR)).rejects.toThrow('Không có quyền tải');
+    await expect(service.downloadEntries(campaign.id, rootId, [trashed.id], DEMO_ACTOR)).rejects.toThrow('đang sử dụng');
+    expect(drive.downloadCalls).toHaveLength(0);
+  });
+
+  it('passes an allowlisted sort through the whole Drive folder listing', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    await service.listFolder(campaign.id, repository.workspace!.campaignFolderId, 'ACTIVE', undefined, DEMO_ACTOR, 'UPDATED', 'DESC');
+    expect(drive.orderByCalls.at(-1)).toBe('folder,modifiedTime desc,name_natural');
+  });
+
+  it('browses and edits nested folders while denying items outside the linked campaign root', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const rootId = repository.workspace!.campaignFolderId!;
+    const nested = await service.createSubfolder(campaign.id, rootId, 'Bài PR', DEMO_ACTOR);
+    expect(nested.isFolder).toBe(true);
+    const uploaded = await service.uploadToFolder(campaign.id, nested.id,
+      { originalname: 'Bản tin.pdf', mimetype: 'application/pdf', size: 3, buffer: Buffer.from('PDF') }, DEMO_ACTOR);
+    const listing = await service.listFolder(campaign.id, nested.id, 'ACTIVE', undefined, DEMO_ACTOR);
+    expect(drive.orderByCalls.at(-1)).toBe('folder,name_natural');
+    expect(listing.breadcrumbs.map((part) => part.id)).toEqual([rootId, nested.id]);
+    expect(listing.items.map((item) => item.id)).toEqual([uploaded.file.id]);
+    await service.renameEntry(campaign.id, uploaded.file.id, 'Bản tin mới.pdf', DEMO_ACTOR);
+    await service.trashEntry(campaign.id, uploaded.file.id, DEMO_ACTOR);
+    expect((await service.listFolder(campaign.id, nested.id, 'TRASHED', undefined, DEMO_ACTOR)).items).toHaveLength(1);
+    await service.restoreEntry(campaign.id, uploaded.file.id, DEMO_ACTOR);
+    await expect(service.trashEntry(campaign.id, rootId, DEMO_ACTOR)).rejects.toThrow('thư mục gốc');
+    const outside = driveItem('outside-folder-12345', 'Ngoài Chiến dịch', PARENT_FOLDER_ID);
+    drive.items.set(outside.id, outside);
+    await expect(service.listFolder(campaign.id, outside.id, 'ACTIVE', undefined, DEMO_ACTOR)).rejects.toThrow('ngoài phạm vi');
+  });
+
+  it('keeps adopted folder contents unchanged during later ensure calls', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const adopted = driveItem('adopted-folder-12345', `${campaign.code} ${campaign.name}`, PARENT_FOLDER_ID);
+    drive.items.set(adopted.id, adopted);
+    await repository.save({ ...repository.workspace!, campaignFolderId: adopted.id,
+      campaignFolderLink: `https://drive.google.com/drive/folders/${adopted.id}`, templateVersion: 2,
+      baseDocumentsFolderId: null, mediaAssetsFolderId: null, otherDocumentsFolderId: null });
+    const countBefore = drive.createdNames.length;
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    expect(drive.createdNames).toHaveLength(countBefore);
+    expect(repository.workspace?.baseDocumentsFolderId).toBeNull();
+    expect((await service.listFolder(campaign.id, adopted.id, 'ACTIVE', undefined, DEMO_ACTOR)).items).toHaveLength(0);
+  });
   it('creates the exact Vietnamese folder template without adding a public permission and remains idempotent', async () => {
     const { service, drive, repository } = services();
     const first = await service.ensure(campaign.id, DEMO_ACTOR);
@@ -228,6 +402,47 @@ describe('CampaignDriveApplicationService', () => {
     const url = `https://drive.google.com/drive/folders/${root.id}`;
     await expect(service.previewExistingFolder(campaign.id, url, DEMO_ACTOR)).rejects.toThrow('parent folder');
     await expect(service.adoptExistingFolder(campaign.id, url, root.name, false, DEMO_ACTOR)).rejects.toThrow('xác nhận');
+  });
+
+  it('relinks only an empty generated workspace, preserves legacy files and trashes the replaced template', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const previousId = repository.workspace!.campaignFolderId!;
+    const source = driveItem('existing-source-folder', `${campaign.code} ${campaign.name}`, PARENT_FOLDER_ID);
+    const base = driveItem('existing-source-base', `${campaign.code} Văn bản cơ sở`, source.id);
+    const media = driveItem('existing-source-media', `${campaign.code} Tư liệu QCTT`, source.id);
+    const other = driveItem('existing-source-other', `${campaign.code} Chứng từ khác`, source.id);
+    const sourceFile = driveItem('existing-source-file', 'Tài liệu gốc.pdf', base.id, { mimeType: 'application/pdf' });
+    for (const item of [source, base, media, other, sourceFile]) drive.items.set(item.id, item);
+    const url = `https://drive.google.com/drive/folders/${source.id}`;
+    const preview = await service.previewExistingFolder(campaign.id, url, DEMO_ACTOR);
+    expect(preview.replacingFolderId).toBe(previousId);
+    expect(preview.childFolderRenames).toEqual([{ folderId: other.id, currentName: other.name, expectedName: `${campaign.code} Tài liệu khác` }]);
+    await expect(service.adoptExistingFolder(campaign.id, url, preview.currentName, true, DEMO_ACTOR)).rejects.toThrow('Liên kết Google Drive hiện tại');
+    expect(repository.workspace?.campaignFolderId).toBe(previousId);
+
+    const result = await service.adoptExistingFolder(campaign.id, url, preview.currentName, true, DEMO_ACTOR, previousId);
+    expect(result.syncStatus).toBe('READY');
+    expect(repository.workspace?.campaignFolderId).toBe(source.id);
+    expect(repository.workspace?.baseDocumentsFolderId).toBe(base.id);
+    expect(repository.workspace?.mediaAssetsFolderId).toBe(media.id);
+    expect(repository.workspace?.otherDocumentsFolderId).toBe(other.id);
+    expect(drive.items.get(sourceFile.id)?.name).toBe(sourceFile.name);
+    expect(drive.items.get(previousId)?.trashed).toBe(true);
+    expect(repository.audits.some((audit) => audit.action === 'campaign.drive_replaced_empty_folder_trashed')).toBe(true);
+  });
+
+  it('refuses to replace a linked workspace containing a file, including in a child folder', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const previousId = repository.workspace!.campaignFolderId!;
+    const source = driveItem('existing-source-folder', `${campaign.code} ${campaign.name}`, PARENT_FOLDER_ID);
+    drive.items.set(source.id, source);
+    const file = driveItem('existing-user-file', 'Không được mất.pdf', repository.workspace!.mediaAssetsFolderId!, { mimeType: 'application/pdf' });
+    drive.items.set(file.id, file);
+    await expect(service.previewExistingFolder(campaign.id, `https://drive.google.com/drive/folders/${source.id}`, DEMO_ACTOR)).rejects.toThrow('có dữ liệu');
+    expect(repository.workspace?.campaignFolderId).toBe(previousId);
+    expect(drive.items.get(previousId)?.trashed).toBe(false);
   });
 
   it('recognizes exactly one folder by campaign code and creates only missing child folders', async () => {
@@ -438,5 +653,72 @@ describe('CampaignDriveApplicationService', () => {
     const { service } = services();
     const guest: ActorContext = { ...DEMO_ACTOR, roles: ['GUEST'] };
     await expect(service.getWorkspace(campaign.id, guest)).rejects.toThrow('không có quyền xem');
+  });
+
+  it('reconciles an upload by its Drive marker and reuses the same file on retry', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const rootId = repository.workspace!.campaignFolderId!;
+    const folder = await service.createSubfolder(campaign.id, rootId, 'Nguồn', DEMO_ACTOR);
+    const uploadId = '8f8d3e1a-25f4-4f26-bc68-a6142fa13e12';
+    const input = { originalname: 'Brief.pdf', mimetype: 'application/pdf', size: 3, buffer: Buffer.from('PDF') };
+    const first = await service.uploadToFolder(campaign.id, folder.id, input, DEMO_ACTOR, uploadId);
+    expect((await service.uploadStatus(campaign.id, folder.id, uploadId, DEMO_ACTOR)).file?.id).toBe(first.file.id);
+    const again = await service.uploadToFolder(campaign.id, folder.id, input, DEMO_ACTOR, uploadId);
+    expect(again.uploadMode).toBe('RECOVERED');
+    expect(again.file.id).toBe(first.file.id);
+    expect(drive.uploadNames).toEqual(['Brief.pdf']);
+    expect(repository.audits.filter((audit) => audit.action === 'campaign.drive_file_uploaded')).toHaveLength(1);
+  });
+
+  it('changes only direct permissions on an in-scope folder and leaves inherited grants alone', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const folder = await service.createSubfolder(campaign.id, repository.workspace!.campaignFolderId!, 'Hình ảnh', DEMO_ACTOR);
+    drive.permissions.set(folder.id, [{ id: 'permission-inherited-001', type: 'anyone', role: 'writer', emailAddress: null,
+      displayName: null, allowFileDiscovery: false, inherited: true }]);
+    await expect(service.changeFolderPermission(campaign.id, folder.id, 'permission-inherited-001', null, DEMO_ACTOR))
+      .rejects.toThrow('Quyền kế thừa');
+    await expect(service.createFolderPermission(campaign.id, folder.id, 'anyone', 'writer', undefined, DEMO_ACTOR))
+      .rejects.toThrow('không mở quyền công khai');
+    const added = await service.createFolderPermission(campaign.id, folder.id, 'user', 'reader', 'reviewer@example.test', DEMO_ACTOR);
+    const direct = added.permissions.find((permission) => permission.emailAddress === 'reviewer@example.test')!;
+    expect(direct.role).toBe('reader');
+    expect((await service.changeFolderPermission(campaign.id, folder.id, direct.id, 'writer', DEMO_ACTOR)).permissions.find((permission) => permission.id === direct.id)?.role).toBe('writer');
+    expect((await service.changeFolderPermission(campaign.id, folder.id, direct.id, null, DEMO_ACTOR)).permissions.find((permission) => permission.id === direct.id)).toBeUndefined();
+    expect((await service.getFolderSharing(campaign.id, folder.id, DEMO_ACTOR)).permissions.find((permission) => permission.inherited)).toBeDefined();
+    await expect(service.getFolderSharing(campaign.id, PARENT_FOLDER_ID, DEMO_ACTOR)).rejects.toThrow('ngoài phạm vi');
+  });
+
+  it('limits inherited link access only on the selected child folder before restricting it', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const folder = await service.createSubfolder(campaign.id, repository.workspace!.campaignFolderId!, 'Hình ảnh', DEMO_ACTOR);
+    drive.items.set(folder.id, { ...drive.items.get(folder.id)!, capabilities: { ...drive.items.get(folder.id)!.capabilities,
+      canDisableInheritedPermissions: true } });
+    drive.permissions.set(folder.id, [{ id: 'inherited-public', type: 'anyone', role: 'commenter', inheritedRole: 'commenter',
+      emailAddress: null, displayName: null, allowFileDiscovery: false, inherited: true }]);
+    await expect(service.setFolderGeneralAccess(campaign.id, folder.id, 'RESTRICTED', undefined, false, DEMO_ACTOR))
+      .rejects.toThrow('xác nhận');
+    expect(drive.limitedFolders).toEqual([]);
+    const restricted = await service.setFolderGeneralAccess(campaign.id, folder.id, 'RESTRICTED', undefined, true, DEMO_ACTOR);
+    expect(restricted.limitedAccess).toBe(true);
+    expect(drive.limitedFolders).toEqual([folder.id]);
+    expect(drive.items.get(repository.workspace!.campaignFolderId!)!.inheritedPermissionsDisabled).toBeUndefined();
+    await expect(service.setFolderGeneralAccess(campaign.id, folder.id, 'ANYONE', 'reader', false, DEMO_ACTOR)).resolves.toMatchObject({ limitedAccess: true });
+    expect(drive.permissions.get(folder.id)?.some((permission) => permission.type === 'anyone' && !permission.inherited && permission.role === 'reader')).toBe(true);
+    await expect(service.setFolderGeneralAccess(campaign.id, PARENT_FOLDER_ID, 'ANYONE', 'writer', false, DEMO_ACTOR))
+      .rejects.toThrow('ngoài phạm vi');
+  });
+
+  it('rejects lowering inherited link access when Google did not grant folder Manager capability', async () => {
+    const { service, drive, repository } = services();
+    await service.ensure(campaign.id, DEMO_ACTOR);
+    const folder = await service.createSubfolder(campaign.id, repository.workspace!.campaignFolderId!, 'Hình ảnh', DEMO_ACTOR);
+    drive.permissions.set(folder.id, [{ id: 'inherited-public', type: 'anyone', role: 'commenter', inheritedRole: 'commenter',
+      emailAddress: null, displayName: null, allowFileDiscovery: false, inherited: true }]);
+    await expect(service.setFolderGeneralAccess(campaign.id, folder.id, 'ANYONE', 'reader', true, DEMO_ACTOR))
+      .rejects.toThrow('Manager');
+    expect(drive.limitedFolders).toEqual([]);
   });
 });

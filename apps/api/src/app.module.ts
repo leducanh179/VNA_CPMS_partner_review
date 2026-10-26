@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiModule } from './modules/ai/ai.module';
 import { GridDraftModule } from './modules/grid-draft/grid-draft.module';
 import { DirectoryModule } from './modules/directory/directory.module';
 import { QcttCatalogModule } from './modules/qctt-catalog/qctt-catalog.module';
@@ -18,6 +19,7 @@ import { CampaignWorkflowModule } from './modules/campaign-workflow/campaign-wor
 
 @Module({
   imports: [
+    AiModule,
     GridDraftModule,
     DirectoryModule,
     QcttCatalogModule,

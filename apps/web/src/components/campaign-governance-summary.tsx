@@ -1,7 +1,8 @@
 import type { CampaignSummary } from '@cpms/domain';
-import { Card, CpmsIcon, StatusBadge } from '@cpms/ui';
+import { Card, CpmsIcon } from '@cpms/ui';
 import { CAMPAIGN_STATE_LABELS } from '../lib/campaign-presentation';
-import { useWorkflow, workflowLabel, type WorkflowAssignment, type WorkflowView } from '../lib/campaign-workflow';
+import { useWorkflow, type WorkflowAssignment, type WorkflowView } from '../lib/campaign-workflow';
+import { CampaignStatusHighlight } from './campaign-status-highlight';
 
 export function CampaignGovernanceSummary({ campaign }: { campaign: CampaignSummary }) {
   const { view } = useWorkflow(campaign.id);
@@ -12,9 +13,8 @@ export function CampaignGovernanceSummary({ campaign }: { campaign: CampaignSumm
   const active = view?.assignments.filter((assignment) => !assignment.endsAt) ?? [];
 
   return <Card className="mb-4 overflow-hidden">
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-4 lg:px-6">
-      <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tình trạng Chiến dịch</p><p className="mt-1 text-lg font-semibold text-slate-950">{status}</p></div>
-      <StatusBadge>{campaign.pendingChangeLabel || workflowLabel(revisionState ?? campaign.lifecycleState)}</StatusBadge>
+    <div className="p-4 lg:p-5">
+      <CampaignStatusHighlight campaign={campaign} status={status} label="Tình trạng Chiến dịch" />
     </div>
     {showTeam ? <div className="px-5 py-5 lg:px-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950"><CpmsIcon name="users" />Nhóm phụ trách QCTT</h2>

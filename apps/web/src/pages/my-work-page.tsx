@@ -17,6 +17,7 @@ const sections = { PENDING: 'Chờ tôi xử lý', FOLLOWING: 'Tôi đã gửi /
 export function MyWorkPage() {
   const [bookingCounts,setBookingCounts]=useState<Record<string,number>>({});
   const [contractCounts,setContractCounts]=useState<Record<string,number>>({});
+  const [driveCounts,setDriveCounts]=useState<Record<string,number>>({});
   const [data, setData] = useState<Inbox | null>(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<keyof typeof sections>('PENDING'); const [page, setPage] = useState(1);
   const [reply, setReply] = useState<{ item: InboxItem; operation: string } | null>(null);
@@ -31,9 +32,10 @@ export function MyWorkPage() {
   const currentPage = Math.min(page, totalPages); const visible = items.slice((currentPage - 1) * 10, currentPage * 10);
   const name = (id: string | null) => data?.people.find((p) => p.id === id)?.displayName ?? 'Lãnh đạo Ban TT';
   return <div className="space-y-5"><header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold">Việc của tôi</h1><p className="mt-2 text-sm text-slate-600">Nhiệm vụ và phạm vi trách nhiệm của tài khoản đang đăng nhập.</p></div><Button size="sm" variant="secondary" disabled={busy || editing} onClick={() => {bookingChanged();contractsChanged();void load();}}><CpmsIcon name="refresh" />Tải lại</Button></header>
-    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Nhóm việc của tôi">{(Object.keys(sections) as (keyof typeof sections)[]).map((key) => <button key={key} role="tab" aria-selected={tab === key} disabled={editing} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === key ? 'bg-vna-blue text-white' : 'bg-white text-slate-600'}`} onClick={() => { setTab(key); setPage(1); }}>{sections[key]} ({(data?.items.filter((item) => item.section === key).length ?? 0)+(bookingCounts[key]??0)+(contractCounts[key]??0)})</button>)}</div>
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Nhóm việc của tôi">{(Object.keys(sections) as (keyof typeof sections)[]).map((key) => <button key={key} role="tab" aria-selected={tab === key} disabled={editing} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === key ? 'bg-vna-blue text-white' : 'bg-white text-slate-600'}`} onClick={() => { setTab(key); setPage(1); }}>{sections[key]} ({(data?.items.filter((item) => item.section === key).length ?? 0)+(bookingCounts[key]??0)+(contractCounts[key]??0)+(driveCounts[key]??0)})</button>)}</div>
     <BookingInbox section={tab} onCounts={setBookingCounts}/>
     <ContractInbox section={tab} onCounts={setContractCounts}/>
+    <DriveRelinkInbox section={tab} onCounts={setDriveCounts}/>
     {success && <p role="status" className="rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">{success}</p>}
     {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
     {reply && <Card className="p-5"><InvitationReply item={reply.item} operation={reply.operation} onClose={() => setReply(null)} onSaved={() => { setReply(null); void load(); }} /></Card>}
@@ -45,9 +47,30 @@ export function MyWorkPage() {
         : inboxDecisionKind(item) ? <InboxDecisionButtons item={item} disabled={editing} onSelect={(value) => { generation.current++; setBusy(false); setSuccess(''); setDecision({ item, value }); }} />
         : item.section === 'PENDING' && item.canRespond && item.campaign ? <AppLink className="mt-4 inline-block text-sm font-semibold text-vna-blue" to={campaignDetailPath(item.campaignId)}>Mở hồ sơ để xử lý</AppLink> : null}
       {decision?.item.id === item.id && <MyWorkDecisionPanel key={`${item.id}:${decision.value}`} item={decision.item} decision={decision.value} onClose={() => { setDecision(null); void load(); }} onSaved={() => { setSuccess(`${decision.value === 'approve' ? 'Đã phê duyệt' : 'Đã từ chối'} · ${item.campaign?.code} · ${workflowLabel(item.kind)}.`); setDecision(null); workflowChanged(); void load(); }} />}
-    </Card>)}{!busy && !visible.length && !bookingCounts[tab] && !contractCounts[tab] && <Card className="p-8 text-center text-sm text-slate-500">Không có công việc trong nhóm này.</Card>}</div>
+    </Card>)}{!busy && !visible.length && !bookingCounts[tab] && !contractCounts[tab] && !driveCounts[tab] && <Card className="p-8 text-center text-sm text-slate-500">Không có công việc trong nhóm này.</Card>}</div>
     {items.length>0&&<div className="flex items-center justify-between gap-3 text-sm"><span>{items.length} mục · Trang {currentPage}/{totalPages}</span><div className="flex gap-2"><Button size="sm" variant="secondary" disabled={currentPage <= 1 || editing} onClick={() => setPage(currentPage - 1)}>Trước</Button><Button size="sm" variant="secondary" disabled={currentPage >= totalPages || editing} onClick={() => setPage(currentPage + 1)}>Sau</Button></div></div>}
   </div>;
+}
+function DriveRelinkInbox({ section, onCounts }: { section: keyof typeof sections; onCounts(counts: Record<string, number>): void }) {
+  const [items, setItems] = useState<Array<{ campaignId: string; campaignCode: string; campaignName: string; requestId: string; reason: string; requestedAt: string }>>([]);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const response = await requestJson<{ items: typeof items }>('/campaign-drive/relink-inbox');
+        if (active) { setItems(response.items); setError(''); onCounts({ PENDING: response.items.length }); }
+      } catch (caught) { if (active) { setError(caught instanceof Error ? caught.message : 'Không tải được yêu cầu đổi thư mục Drive.'); onCounts({ PENDING: 0 }); } }
+    };
+    void load();
+    const refresh = () => { void load(); };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('cpms:workflow-updated', refresh);
+    const timer = window.setInterval(refresh, 30_000);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('cpms:workflow-updated', refresh); };
+  }, [onCounts]);
+  if (section !== 'PENDING') return null;
+  return <div className="space-y-3">{error && <p role="alert" className="text-sm text-rose-700">{error}</p>}{items.map((item) => <Card key={item.requestId} className="p-5"><AppLink className="font-semibold text-vna-blue" to={`${campaignDetailPath(item.campaignId)}?tab=documents`}>{item.campaignCode} · {item.campaignName}</AppLink><p className="mt-1 text-sm">Yêu cầu thay đổi Thư mục Google Drive</p><p className="mt-2 text-xs text-slate-500">{workflowTime(item.requestedAt)}</p><p className="mt-3 whitespace-pre-wrap text-sm">Lý do: {item.reason}</p><AppLink className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-vna-blue" to={`${campaignDetailPath(item.campaignId)}?tab=documents`}><CpmsIcon name="approve" />Xem và phê duyệt trong tab Tư liệu</AppLink></Card>)}</div>;
 }
 function InvitationReply({ item, operation, onClose, onSaved }: { item: InboxItem; operation: string; onClose(): void; onSaved(): void }) {
   const [key] = useState(() => crypto.randomUUID()); const [reason, setReason] = useState(''); const [busy, setBusy] = useState(false);

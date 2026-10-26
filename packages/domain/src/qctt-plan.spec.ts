@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { emptyQcttPlanFields, matchingPlanItems, projectPlanBookings, qcttPlanCompleteness, type QcttPlanItem } from './qctt-plan';
+import { emptyQcttPlanFields, matchingPlanItems, projectPlanBookings, qcttPlanCompleteness, qcttPlanColumnHasData, type QcttPlanItem } from './qctt-plan';
 import type { BookingView } from './booking';
 import { bookingSnapshot } from './booking-workflow';
 const classification = { professionLayer: 'PFL-001', professionLayerName: 'Advertising', channelCode: 'CHN-004', channelName: 'Social', activityCode: 'ATV-003', activityName: 'Facebook', catalogVersion: 1 };
 const item = (id: string): QcttPlanItem => ({ ...emptyQcttPlanFields(), id, campaignId:'campaign', activityLabel:'Facebook', professionLayer:'PFL-001',channelCode:'CHN-004',activityCode:'ATV-003',departmentId:'division',startDate:'2026-10-05',endDate:'2026-10-25',classification,recordVersion:1,sortOrder:1,origin:'MANUAL',deletedAt:null,createdByActorId:'manager',createdAt:'2026-09-25',updatedAt:'2026-09-25' });
 const booking:BookingView={id:'booking',allocationId:'allocation',contractId:'contract',slotId:'slot',campaignId:'campaign',planItemId:'opening',campaignLabel:'AMD',startDate:'2026-10-05',endDate:'2026-10-20',quantity:'100',materialId:null,materialUrl:null,note:'',unit:'reach',unitPrice:'1',priceBasis:'1',taxRate:'0',amount:'100',vat:'0',gross:'100',state:'ACTIVE',deletedAt:null,vendorConfirmedQty:null,sourceApprovedQty:null,acceptedQty:'0',reportState:'EMPTY',reportTemplateId:null,reportData:{},sourceKey:null,source:{},recordVersion:1,createdByActorId:'vendor',createdAt:'2026-09-25',updatedAt:'2026-09-25'};
 describe('QCTT operational plan', () => {
+  it('protects populated field bindings including Trash while allowing empty fields and layout placeholders', () => {
+    const row = { ...item('row'), deletedAt: '2026-10-14', requirements: '', content: { schemaVersion: 1 as const, type: 'doc' as const, content: [{ type: 'paragraph' as const, content: [] }] }, customValues: { 'custom:test': 'Value' } };
+    expect(qcttPlanColumnHasData([row], 'campaignId')).toBe(true);
+    expect(qcttPlanColumnHasData([row], 'activityLabel')).toBe(true);
+    expect(qcttPlanColumnHasData([row], 'custom:test')).toBe(true);
+    expect(qcttPlanColumnHasData([row], 'requirements')).toBe(false);
+    expect(qcttPlanColumnHasData([row], 'content')).toBe(false);
+    expect(qcttPlanColumnHasData([row], 'blank:test')).toBe(false);
+  });
   it('keeps repeated activities distinct and matches IDs plus department, never labels', () => {
     const a=item('opening'),b={...item('launch'),activityLabel:'Another phase'};
     expect(matchingPlanItems([a,b],classification,'division').map(i=>i.id)).toEqual(['opening','launch']);

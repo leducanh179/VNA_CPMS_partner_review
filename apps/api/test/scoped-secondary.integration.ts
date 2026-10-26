@@ -10,6 +10,8 @@ import type { ScopedCampaignApplicationService } from '../src/modules/campaign/a
 import type { ScopedCampaignSpreadsheetApplicationService } from '../src/modules/campaign/application/scoped-campaign-spreadsheet.application-service';
 import { ScopedMaterialApplicationService } from '../src/modules/material/application/scoped-material.application-service';
 import { PrismaMaterialRepository } from '../src/modules/material/infrastructure/prisma-material.repository';
+import { MaterialSharingApplicationService } from '../src/modules/material/application/material-sharing.application-service';
+import { PrismaMaterialSharingRepository } from '../src/modules/material/infrastructure/prisma-material-sharing.repository';
 import { ScopedCatalogApplicationService } from '../src/modules/catalog/application/scoped-catalog.application-service';
 import { PrismaCatalogRepository } from '../src/modules/catalog/infrastructure/prisma-catalog.repository';
 import { ProviderOperationAccessService } from '../src/modules/google-integration/application/provider-operation-access.service';
@@ -33,11 +35,12 @@ export async function exerciseScopedSecondary(db: PrismaService, access: AccessA
   };
   await db.permissionDefinition.updateMany({ where: { code: { in: ['material.read','material.create','material.update','material.manage','campaign.drive.read','campaign.drive.ensure','campaign.drive.upload',
     'campaign.drive.rename','campaign.drive.trash','campaign.drive.restore','campaign.sheets.read','campaign.sheets.write','google.connect','google.revoke','campaign.restore','campaign.purge'] } }, data: { implementationStatus: 'IMPLEMENTED' } });
-  const materials = new ScopedMaterialApplicationService(new PrismaMaterialRepository(db), campaigns, access);
-  await assert.rejects(access.withRequestActor(user, () => materials.list()));
-  await assert.rejects(materials.batchSave([{ clientKey: 'no-inheritance', fields: { material_name: 'Denied' } }], user));
+  const materialRepo = new PrismaMaterialRepository(db);
+  const materials = new ScopedMaterialApplicationService(materialRepo, campaigns, access, new MaterialSharingApplicationService(materialRepo, new PrismaMaterialSharingRepository(db), access));
+  assert.deepEqual(await access.withRequestActor(user, () => materials.list()), []);
+  assert.equal((await materials.batchSave([{ clientKey: 'no-inheritance', fields: { material_name: 'Denied' } }], user)).failed, 1);
   await grant(user.id, 'material.read'); await grant(user.id, 'material.create');
-  const material = await materials.batchSave([{ clientKey: 'explicit-module-grant', fields: { material_name: 'Synthetic material' } }], user);
+  const material = await materials.batchSave([{ clientKey: 'explicit-module-grant', fields: { material_name: 'Synthetic material', material_link: 'https://example.test/material' } }], user);
   assert.equal(material.succeeded, 1);
   const materialAudit = await db.auditEvent.findFirstOrThrow({ where: { entityId: material.items[0]!.materialId } });
   assert.equal(materialAudit.originalActorId, user.id);
@@ -56,7 +59,7 @@ export async function exerciseScopedSecondary(db: PrismaService, access: AccessA
   let exchanges = 0; let writes = 0; let driveReads = 0; let subject = 'synthetic-provider-owner'; let issueRefresh = true;
   const syntheticToken = randomBytes(32).toString('base64url');
   const item: CloudDriveItem = { id: 'synthetic_file_id', name: 'Synthetic file', mimeType: 'text/plain', driveId: 'synthetic_shared_drive', parents: ['synthetic_child_folder'], trashed: false,
-    size: 10, modifiedTime: null, lastModifiedBy: null, trashedTime: null, trashedBy: null, webViewLink: null, webContentLink: null,
+    size: 10, modifiedTime: null, lastModifiedBy: null, trashedTime: null, trashedBy: null, webViewLink: null, webContentLink: null, shortcutDetails: null,
     capabilities: { canEdit: true, canTrash: true, canUntrash: true, canMoveItemWithinDrive: true, canDownload: true, canAddChildren: true, canShare: true } };
   const unexpectedWrite = async (): Promise<never> => { writes += 1; throw new Error('Unexpected synthetic provider write'); };
   const adapter: CloudDrivePort & CloudSpreadsheetPort & UserOAuthPort = {

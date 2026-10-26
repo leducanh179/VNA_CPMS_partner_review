@@ -2,6 +2,89 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model AiLookupRun {
+  proposals AiAgentProposal[]
+  id           String   @id @db.Uuid
+  conversationId String? @db.Uuid
+  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  actorId      String   @db.Uuid
+  period       String
+  mode         String
+  state        String
+  question     String
+  answer       String   @default("")
+  sources      Json     @default("[]")
+  evidence     Json     @default("[]")
+  usage        Json     @default("{}")
+  artifacts    Json     @default("{}")
+  reservedVnd  Int      @default(0)
+  chargedVnd   Int      @default(0)
+  priceVersion String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([period])
+  @@index([actorId, createdAt])
+  @@index([state, createdAt])
+  @@index([conversationId, createdAt])
+}
+
+model AiWorkspaceState {
+  id String @id
+  version Int @default(0)
+  draftVersion Int @default(0)
+  draft Json @default("{}")
+  published Json @default("{}")
+  libraryVersion Int @default(0)
+  librarySpreadsheetId String @default("")
+  librarySyncedAt DateTime?
+}
+
+model AiPolicyVersion {
+  version Int @id
+  policy Json
+  actorId String @db.Uuid
+  createdAt DateTime @default(now())
+}
+
+model AiLibraryEntry {
+  id String @id
+  itemId String
+  rootId String
+  sourceRow Int
+  data Json
+  @@index([itemId])
+  @@index([rootId])
+}
+
+model AiAgentProposal {
+  id String @id @db.Uuid
+  runId String @db.Uuid
+  run AiLookupRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  actorId String @db.Uuid
+  campaignId String @db.Uuid
+  expectedVersion Int
+  changes Json
+  reason String
+  state String @default("PREPARED")
+  result Json @default("{}")
+  createdAt DateTime @default(now())
+  @@index([runId, actorId])
+}
+
+model AiConversation {
+  id        String @id @db.Uuid
+  actorId   String @db.Uuid
+  title     String
+  version   Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  runs      AiLookupRun[]
+
+  @@index([actorId, deletedAt, updatedAt])
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -166,7 +249,7 @@ model Actor {
   deletedCampaignComments CampaignComment[] @relation("CampaignCommentDeletedBy")
   campaignCommentReactions CampaignCommentReaction[]
   materialComments MaterialComment[]
-  // LEGACY, PERSONNEL or PILOT_ADMIN; the SQL check keeps pilot admins unlinked to personnel.
+  // LEGACY, PERSONNEL, PILOT_ADMIN or PARTNER_DEMO; SQL keeps non-personnel accounts unlinked to HR.
   accountKind String @default("LEGACY") @map("account_kind")
   personnelEmployeeCode String? @unique @map("personnel_employee_code")
   loginEmail String? @unique @map("login_email")
@@ -221,6 +304,8 @@ model Campaign {
   endDate                 DateTime?                   @map("end_date") @db.Date
   effectiveStartDate      DateTime?                   @map("effective_start_date") @db.Date
   effectiveEndDate        DateTime?                   @map("effective_end_date") @db.Date
+  departureStartDate      DateTime?                   @map("departure_start_date") @db.Date
+  departureEndDate        DateTime?                   @map("departure_end_date") @db.Date
   levelCode               String?                     @map("level_code")
   requestingEmployeeCode  String?                     @map("requesting_employee_code")
   manualRequesterEmail    String?                     @map("manual_requester_email")
@@ -247,6 +332,7 @@ model Campaign {
   provinces       CampaignProvince[]
   requestingUnits CampaignRequestingUnit[]
   driveWorkspace  CampaignDriveWorkspace?
+  driveRelinkRequests CampaignDriveRelinkRequest[]
   comments        CampaignComment[]
   scopedRoleBindings ScopedRoleBinding[]
   permissionOverrides AccountPermissionOverride[]
@@ -363,6 +449,33 @@ model CampaignDriveWorkspace {
   @@index([syncStatus, updatedAt])
   @@index([lifecycleStatus, updatedAt])
   @@map("campaign_drive_workspaces")
+}
+
+model CampaignDriveRelinkRequest {
+  id                    String   @id @default(uuid()) @db.Uuid
+  campaignId            String   @map("campaign_id") @db.Uuid
+  sourceFolderId        String   @map("source_folder_id")
+  sourceFolderLink      String   @map("source_folder_link")
+  sourceFolderName      String   @map("source_folder_name")
+  targetFolderId        String   @map("target_folder_id")
+  targetFolderLink      String   @map("target_folder_link")
+  targetFolderName      String   @map("target_folder_name")
+  expectedFolderName    String   @map("expected_folder_name")
+  reason                String
+  status                String   @default("PENDING")
+  requestedByActorId    String   @map("requested_by_actor_id") @db.Uuid
+  requestedAt           DateTime @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decidedByActorId      String?  @map("decided_by_actor_id") @db.Uuid
+  decisionReason        String?  @map("decision_reason")
+  decidedAt             DateTime? @map("decided_at") @db.Timestamptz(3)
+  appliedAt             DateTime? @map("applied_at") @db.Timestamptz(3)
+  lastError             String?  @map("last_error")
+  recordVersion         Int      @default(1) @map("record_version")
+  campaign              Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+
+  @@index([campaignId, requestedAt])
+  @@index([targetFolderId, status])
+  @@map("campaign_drive_relink_requests")
 }
 
 model CampaignLevel {
@@ -608,10 +721,16 @@ model MaterialRecord {
   isDeleted     Boolean  @default(false) @map("is_deleted")
   createdBy     String   @map("created_by")
   updatedBy     String   @map("updated_by")
+  // LEGACY deliberately preserves historical visibility; only new application commands choose SHARED.
+  sharingMode   String   @default("LEGACY") @map("sharing_mode")
+  ownerActorId  String?  @map("owner_actor_id") @db.Uuid
+  sharingCampaignIds String[] @default([]) @map("sharing_campaign_ids") @db.Uuid
+  sharingGrants Json @default("[]") @map("sharing_grants")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([isDeleted, updatedAt])
+  @@index([sharingMode, isDeleted, materialId])
   @@map("material_records")
 }
 

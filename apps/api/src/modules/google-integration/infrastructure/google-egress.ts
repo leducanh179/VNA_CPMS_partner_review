@@ -27,7 +27,7 @@ export class GoogleEgress {
     failureThreshold?: number; cooldownMs?: number; log?: (event: Event) => void;
   } = {}) {}
 
-  async fetch(url: string, init: RequestInit, timeoutMs = 15_000): Promise<Response> {
+  async fetch(url: string, init: RequestInit, timeoutMs = 15_000, maxResponseBytes = 2_000_000): Promise<Response> {
     const host = new URL(url).hostname;
     const group: Group = host === 'oauth2.googleapis.com' || host === 'openidconnect.googleapis.com' ? 'identity' : 'data';
     const state = this.state(group);
@@ -62,9 +62,9 @@ export class GoogleEgress {
               const chunk = await reader.read();
               if (chunk.done) break;
               responseBytes += chunk.value.byteLength;
-              if (responseBytes > 2_000_000) {
+              if (responseBytes > maxResponseBytes) {
                 await reader.cancel();
-                throw new GoogleEgressResponseLimitError('Phản hồi Google vượt giới hạn 2 MB.');
+                throw new GoogleEgressResponseLimitError('Tệp Google Drive vượt giới hạn tải xuống cho phép.');
               }
               chunks.push(chunk.value);
             }

@@ -6,7 +6,7 @@ import { bookingApprovalLabels, bookingEffective, bookingExecutionAsOf, bookingE
 export const QCTT_FORMATS = { WRITE: 'Viết', FILM: 'Quay', PHOTO: 'Chụp', OTHER: 'Khác' } as const;
 export const QCTT_PROGRESS = { PLANNED: 'Dự kiến', IN_PROGRESS: 'Đang thực hiện', COMPLETED: 'Hoàn thành', STOPPED: 'Ngừng thực hiện' } as const;
 export const QCTT_PLAN_FIELDS = ['campaignId', 'professionLayer', 'channelCode', 'activityLabel', 'content', 'startDate', 'endDate', 'departmentId', 'requirements'] as const;
-export type QcttPlanColumn = { key: typeof QCTT_PLAN_FIELDS[number] | `custom:${string}`; label: string };
+export type QcttPlanColumn = { key: typeof QCTT_PLAN_FIELDS[number] | `custom:${string}` | `blank:${string}`; label: string };
 export const DEFAULT_QCTT_PLAN_COLUMNS: QcttPlanColumn[] = [
   { key: 'campaignId', label: 'Chiến dịch' }, { key: 'professionLayer', label: 'Lớp nghiệp vụ' },
   { key: 'channelCode', label: 'Kênh' }, { key: 'activityLabel', label: 'Phương tiện QCTT' },
@@ -20,6 +20,18 @@ export interface QcttPlanFields {
   content: CampaignRichTextDocument | null; format: keyof typeof QCTT_FORMATS | null; otherFormat: string;
   startDate: string | null; endDate: string | null; departmentId: string | null;
   requirements: string; progress: keyof typeof QCTT_PROGRESS;
+}
+/** Column bindings cannot discard existing values, including rows retained in Trash. */
+export function qcttPlanColumnHasData(rows: QcttPlanFields[], key: string): boolean {
+  const richHasValue = (nodes: CampaignRichTextDocument['content']): boolean => nodes.some(node =>
+    Boolean(node.text?.trim()) || Boolean(node.content && richHasValue(node.content)) || !['paragraph', 'text', 'hardBreak'].includes(node.type));
+  return rows.some(row => {
+    if (key.startsWith('blank:')) return false;
+    if (key === 'campaignId') return true;
+    if (key === 'content') return Boolean(row.content && richHasValue(row.content.content));
+    const value = key.startsWith('custom:') ? row.customValues?.[key] : (row as unknown as Record<string, unknown>)[key] ?? row.customValues?.[key];
+    return value !== null && value !== undefined && String(value).trim() !== '';
+  });
 }
 export interface QcttPlanItem extends QcttPlanFields {
   id: string; campaignId: string; recordVersion: number; sortOrder: number; origin: 'MANUAL' | 'BOOKING';

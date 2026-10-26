@@ -3,16 +3,18 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { AccessApplicationService } from '../../access/application/access.application-service';
 import { AccessBoundary } from '../../access/application/access-boundary';
 import { MATERIAL_COLLABORATION_REPOSITORY, type MaterialCollaborationRepository } from './material-collaboration.repository';
+import { MaterialSharingApplicationService } from './material-sharing.application-service';
 
 @Injectable()
 export class MaterialCollaborationApplicationService {
   constructor(
     @Inject(MATERIAL_COLLABORATION_REPOSITORY) private readonly repository: MaterialCollaborationRepository,
     @Inject(AccessApplicationService) private readonly access: AccessApplicationService,
+    @Inject(MaterialSharingApplicationService) private readonly sharing: MaterialSharingApplicationService,
   ) {}
 
   private async requireMaterial(materialId: string) {
-    this.access.require('material.read');
+    await this.sharing.get(materialId);
     if (!(await this.repository.materialExists(materialId))) throw new NotFoundException('Không tìm thấy tư liệu.');
   }
 
@@ -31,7 +33,7 @@ export class MaterialCollaborationApplicationService {
   @AccessBoundary(3)
   async create(materialId: string, body: string, parentId: string | null, actor: ActorContext) {
     await this.requireMaterial(materialId);
-    this.access.require('material.update');
+    await this.sharing.get(materialId, 'edit');
     const text = body.trim();
     if (!text || text.length > 5000) throw new BadRequestException('Bình luận cần 1–5000 ký tự.');
     return this.repository.createComment(materialId, text, parentId, actor);
@@ -40,7 +42,7 @@ export class MaterialCollaborationApplicationService {
   @AccessBoundary(4)
   async update(materialId: string, id: string, body: string, expectedVersion: number, actor: ActorContext) {
     await this.requireMaterial(materialId);
-    this.access.require('material.update');
+    await this.sharing.get(materialId, 'edit');
     const text = body.trim();
     if (!text || text.length > 5000) throw new BadRequestException('Bình luận cần 1–5000 ký tự.');
     return this.repository.updateComment(materialId, id, text, expectedVersion, actor, this.access.check('material.manage').allowed);
@@ -49,7 +51,7 @@ export class MaterialCollaborationApplicationService {
   @AccessBoundary(3)
   async remove(materialId: string, id: string, expectedVersion: number, actor: ActorContext) {
     await this.requireMaterial(materialId);
-    this.access.require('material.update');
+    await this.sharing.get(materialId, 'edit');
     return this.repository.deleteComment(materialId, id, expectedVersion, actor, this.access.check('material.manage').allowed);
   }
 }

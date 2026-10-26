@@ -1,4 +1,4 @@
-import { normalizeDirectorySearch, ROLE_CODES, type RoleCode } from '@cpms/domain';
+import { normalizeDirectorySearch, PARTNER_DEMO_READ_PERMISSIONS, ROLE_CODES, type RoleCode } from '@cpms/domain';
 import { ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { readFile, realpath, stat } from 'node:fs/promises';
@@ -18,7 +18,7 @@ type AccountRow = Prisma.ActorGetPayload<{ include: typeof localAccountInclude }
 type SessionRow = Prisma.LocalSessionGetPayload<{ include: typeof sessionInclude }>;
 
 export function localAccount(row: AccountRow): LocalAccount {
-  const bindings = ['PERSONNEL', 'PILOT_ADMIN'].includes(row.accountKind) ? row.scopedBindings.filter((binding) =>
+  const bindings = ['PERSONNEL', 'PILOT_ADMIN', 'PARTNER_DEMO'].includes(row.accountKind) ? row.scopedBindings.filter((binding) =>
     (!binding.expiresAt || binding.expiresAt.getTime() > Date.now()) && (binding.roleCode !== 'ADMIN' || binding.scopeType === 'SYSTEM')) : row.roles;
   return { id: row.id, key: row.key, displayName: row.displayName, loginEmail: row.loginEmail, accountKind: row.accountKind,
     isActive: row.isActive, authzVersion: row.authzVersion, roles: [...new Set(bindings.map((binding) => binding.roleCode).filter((code): code is RoleCode => (ROLE_CODES as readonly string[]).includes(code)))],
@@ -39,7 +39,8 @@ export async function requireCurrentSession(transaction: Prisma.TransactionClien
   const session = localSession(row);
   if (session.original.credential && isDemoCredentialHash(session.original.credential.passwordHash) && !localDemoCredentialsEnabled()) throw new UnauthorizedException('Phiên demo local không được phép trong môi trường này.');
   const valid = [session.original, session.effective].every((account) => account.accountKind === 'PERSONNEL' && Boolean(account.personnelEmployeeCode) ||
-    account.accountKind === 'PILOT_ADMIN' && !account.personnelEmployeeCode && account.roles.includes('ADMIN')) &&
+    account.accountKind === 'PILOT_ADMIN' && !account.personnelEmployeeCode && account.roles.includes('ADMIN') ||
+    account.accountKind === 'PARTNER_DEMO' && !account.personnelEmployeeCode && account.roles.length === 1 && account.roles[0] === 'VIEWER') &&
     session.original.credential?.credentialVersion === session.credentialVersion &&
     (session.mode === 'DIRECT' || session.original.roles.includes('ADMIN')) &&
     isSessionCurrent({ createdAt: session.createdAt.getTime(), lastSeenAt: session.lastSeenAt.getTime(), expiresAt: session.expiresAt.getTime(),
@@ -80,7 +81,8 @@ export class PrismaIdentityRepository extends IdentityRepository {
     return this.transaction(async (transaction) => {
       const account = await transaction.actor.findUnique({ where: { id: input.originalActorId }, include: localAccountInclude });
       if (!account?.isActive || !(account.accountKind === 'PERSONNEL' && account.personnelEmployeeCode ||
-          account.accountKind === 'PILOT_ADMIN' && !account.personnelEmployeeCode && localAccount(account).roles.includes('ADMIN')) ||
+          account.accountKind === 'PILOT_ADMIN' && !account.personnelEmployeeCode && localAccount(account).roles.includes('ADMIN') ||
+          account.accountKind === 'PARTNER_DEMO' && !account.personnelEmployeeCode && localAccount(account).roles.length === 1 && localAccount(account).roles[0] === 'VIEWER') ||
           account.credential?.credentialVersion !== input.credentialVersion || input.originalActorId !== input.effectiveActorId || input.mode !== 'DIRECT') throw new UnauthorizedException('Thông tin đăng nhập đã thay đổi.');
       const session = localSession(await transaction.localSession.create({ data: input, include: sessionInclude }));
       await identityAudit(transaction, session, 'AUTH_LOGIN', account.id, { mode: 'DIRECT' });
@@ -130,7 +132,7 @@ export class PrismaIdentityRepository extends IdentityRepository {
       const session = await requireCurrentSession(transaction, sessionId, true);
       if (!mustChangePassword && (!localDemoCredentialsEnabled() || !isDemoCredentialHash(passwordHash))) throw new ForbiddenException('Chỉ credential demo local được bỏ yêu cầu đổi mật khẩu.');
       const target = await transaction.actor.findUnique({ where: { id: actorId } });
-      if (!target || !['PERSONNEL', 'PILOT_ADMIN'].includes(target.accountKind) || !target.isActive || !reason.trim() ||
+      if (!target || !['PERSONNEL', 'PILOT_ADMIN', 'PARTNER_DEMO'].includes(target.accountKind) || !target.isActive || !reason.trim() ||
           (session.original.accountKind === 'PILOT_ADMIN' && target.id !== session.original.id && target.accountKind === 'PILOT_ADMIN')) throw new ForbiddenException('Không thể thiết lập đăng nhập cho tài khoản này.');
       if (session.original.accountKind === 'PILOT_ADMIN' && target.accountKind === 'PERSONNEL' &&
           await transaction.scopedRoleBinding.count({ where: { actorId: target.id, roleCode: 'ADMIN', scopeType: 'SYSTEM' } })) {
@@ -147,7 +149,7 @@ export class PrismaIdentityRepository extends IdentityRepository {
     await this.transaction(async (transaction) => {
       const session = await requireCurrentSession(transaction, sessionId, true);
       const target = await transaction.actor.findUnique({ where: { id: change.targetActorId }, include: localAccountInclude });
-      if (!target || !['PERSONNEL', 'PILOT_ADMIN'].includes(target.accountKind) || !change.reason.trim()) throw new ForbiddenException('Không thể thay đổi tài khoản này.');
+      if (!target || !['PERSONNEL', 'PILOT_ADMIN', 'PARTNER_DEMO'].includes(target.accountKind) || !change.reason.trim()) throw new ForbiddenException('Không thể thay đổi tài khoản này.');
       if (session.original.accountKind === 'PILOT_ADMIN' && (target.accountKind === 'PILOT_ADMIN' || localAccount(target).roles.includes('ADMIN'))) {
         throw new ForbiddenException('Tài khoản thử nghiệm không được khóa quản trị viên khác.');
       }
@@ -265,6 +267,33 @@ export class PrismaIdentityRepository extends IdentityRepository {
       return localAccount(await transaction.actor.findUniqueOrThrow({ where: { id: actor.id }, include: localAccountInclude }));
     });
   }
+  async createPartnerDemos(sessionId: string, accounts: { email: string; passwordHash: string }[], reason: string) {
+    return this.transaction(async transaction => {
+      const session = await requireCurrentSession(transaction, sessionId, true);
+      const emails = accounts.map(account => account.email);
+      if (await transaction.actor.findFirst({ where: { loginEmail: { in: emails } }, select: { id: true } }) ||
+          await transaction.personnelDirectoryEntry.findFirst({ where: { email: { in: emails } }, select: { employeeCode: true } })) throw new ConflictException('Email đã thuộc tài khoản hoặc nhân sự; không ghi đè.');
+      const definitions = await transaction.permissionDefinition.findMany({ where: { code: { in: [...PARTNER_DEMO_READ_PERMISSIONS] }, implementationStatus: 'IMPLEMENTED' }, select: { code: true } });
+      if (definitions.length !== PARTNER_DEMO_READ_PERMISSIONS.length || !await transaction.role.findUnique({ where: { code: 'VIEWER' } })) throw new ConflictException('Danh mục quyền chưa đầy đủ.');
+      const result: LocalAccount[] = [];
+      for (const account of accounts) {
+        const actor = await transaction.actor.create({ data: {
+          key: `partner-demo:${randomUUID()}`, accountKind: 'PARTNER_DEMO', loginEmail: account.email,
+          displayName: `Demo IT · ${account.email.split('@')[0]}`, credential: { create: { passwordHash: account.passwordHash, mustChangePassword: false } },
+          roles: { create: { roleCode: 'VIEWER' } },
+          scopedBindings: { create: { roleCode: 'VIEWER', scopeType: 'SYSTEM', scopeKey: JSON.stringify(['SYSTEM', null, null, null]) } },
+          permissionOverrides: { create: PARTNER_DEMO_READ_PERMISSIONS.map(permissionCode => ({
+            permissionCode, scopeType: 'MODULE', module: permissionCode.split('.')[0]!.toUpperCase(), effect: 'ALLOW', relation: 'ALL',
+            scopeKey: JSON.stringify(['MODULE', permissionCode.split('.')[0]!.toUpperCase(), null, null, null]),
+          })) },
+        }, include: localAccountInclude });
+        await identityAudit(transaction, session, 'PARTNER_DEMO_CREATED', actor.id, { accountKind: 'PARTNER_DEMO', readablePermissions: [...PARTNER_DEMO_READ_PERMISSIONS], privateFormDrafts: true, businessWrites: false, reason });
+        result.push(localAccount(actor));
+      }
+      await transaction.accessPolicyState.upsert({ where: { key: 'access' }, create: { key: 'access' }, update: { recordVersion: { increment: 1 } } });
+      return result;
+    });
+  }
   async updateGmail(sessionId: string, actorId: string, expectedVersion: number, gmailEmail: string | null, reason: string) {
     await this.transaction(async (transaction) => {
       const session = await requireCurrentSession(transaction, sessionId, true);
@@ -285,7 +314,7 @@ export class PrismaIdentityRepository extends IdentityRepository {
   }
   async listAccounts(sessionId: string) {
     return this.transaction(async (transaction) => { await requireCurrentSession(transaction, sessionId, true);
-      return (await transaction.actor.findMany({ where: { accountKind: { in: ['PERSONNEL', 'PILOT_ADMIN'] } }, include: localAccountInclude, orderBy: { displayName: 'asc' } })).map(localAccount);
+      return (await transaction.actor.findMany({ where: { accountKind: { in: ['PERSONNEL', 'PILOT_ADMIN', 'PARTNER_DEMO'] } }, include: localAccountInclude, orderBy: { displayName: 'asc' } })).map(localAccount);
     });
   }
   async configureLocalDemoCredentials(sessionId: string, credentials: { actorId: string; expectedVersion: number; passwordHash: string }[], reason: string) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateAccess, validateAccessRule, type AccessIdentity, type AccessRequest, type AccessResource, type AccessRule } from './access-policy';
+import { ACCESS_PERMISSIONS, PARTNER_DEMO_READ_PERMISSIONS, evaluateAccess, validateAccessRule, type AccessModule, type AccessIdentity, type AccessRequest, type AccessResource, type AccessRule } from './access-policy';
 
 const identity: AccessIdentity = {
   effectiveActorId: 'synthetic-user', originalActorId: 'synthetic-user', sessionValid: true,
@@ -16,6 +16,18 @@ const record = { tier: 'RECORD', module: 'campaign', resourceType: 'CAMPAIGN', r
 const field = { ...record, tier: 'FIELD', fieldKey: 'campaign_name' } as const;
 
 describe('scoped policy truth table (kernel, not HTTP enforcement)', () => {
+  it('keeps partner demos read-only even with admin facts, assignment and explicit write grants', () => {
+    for (const permission of ACCESS_PERMISSIONS) {
+      const scoped = { ...request, identity: { ...identity, readOnlyDemo: true, effectiveSuperadmin: true }, permission,
+        resource: { ...resource, type: 'CONTRACT' as const, assignedActorIds: [] } };
+      const grant = rule('demo-grant', { permission, scope: { tier: 'MODULE', module: permission.split('.')[0] as AccessModule } });
+      const expected = (PARTNER_DEMO_READ_PERMISSIONS as readonly string[]).includes(permission);
+      expect(evaluateAccess(scoped, [grant]).allowed, permission).toBe(expected);
+    }
+    expect(evaluateAccess({ ...request, identity: { ...identity, readOnlyDemo: true }, permission: 'contract.read', resource: { ...resource, type: 'CONTRACT', assignedActorIds: [] } }, []).allowed).toBe(false);
+    const deny = rule('demo-read-deny', { permission: 'campaign.read', effect: 'DENY' });
+    expect(evaluateAccess({ ...request, identity: { ...identity, readOnlyDemo: true }, permission: 'campaign.read' }, [read, deny]).allowed).toBe(false);
+  });
   it('permits operator creation only for the assigned allocation and keeps explicit denials', () => {
     const scoped:AccessResource={...resource,type:'BOOKING',bookingOperators:['synthetic-user']};
     expect(evaluateAccess({...request,resource:scoped,permission:'booking.create'},[]).allowed).toBe(true);

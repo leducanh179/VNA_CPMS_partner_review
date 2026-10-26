@@ -83,8 +83,10 @@ const CAMPAIGN_FIELD_BASE_DEFINITIONS: readonly Omit<CampaignFieldDefinition, 's
 
   field('campaign_comm_start_date', 'Bắt đầu truyền thông', 'Thời gian', 'date', { defaultVisible: true, width: 180 }),
   field('campaign_comm_end_date', 'Kết thúc truyền thông', 'Thời gian', 'date', { defaultVisible: true, width: 180 }),
-  field('campaign_effect_start_date', 'Bắt đầu hiệu lực', 'Thời gian', 'date', { width: 170 }),
-  field('campaign_effect_end_date', 'Kết thúc hiệu lực', 'Thời gian', 'date', { width: 170 }),
+  field('campaign_effect_start_date', 'Bắt đầu hiệu lực chương trình/xuất vé', 'Thời gian', 'date', { width: 220 }),
+  field('campaign_effect_end_date', 'Kết thúc hiệu lực chương trình/xuất vé', 'Thời gian', 'date', { width: 220 }),
+  field('campaign_departure_start_date', 'Bắt đầu hiệu lực khởi hành', 'Thời gian', 'date', { width: 180 }),
+  field('campaign_departure_end_date', 'Kết thúc hiệu lực khởi hành', 'Thời gian', 'date', { width: 180 }),
   field('travel_start_date', 'Bắt đầu hành trình', 'Thời gian', 'date', { width: 180 }),
   field('travel_end_date', 'Kết thúc hành trình', 'Thời gian', 'date', { width: 180 }),
 
@@ -130,7 +132,7 @@ const ACTIVE_V2_FIELDS = new Set([
   'request_secondary_objective', 'request_campaign_description', 'campaign_genre',
   'additional_information', 'source_document_links', 'other_material_links',
   'campaign_comm_start_date', 'campaign_comm_end_date', 'campaign_effect_start_date',
-  'campaign_effect_end_date', 'market', 'route_or_product', 'campaign_objective',
+  'campaign_effect_end_date', 'campaign_departure_start_date', 'campaign_departure_end_date', 'market', 'route_or_product', 'campaign_objective',
   'kpi_primary', 'content_pillar_l1_code', 'content_pillar_l2_code',
 ]);
 

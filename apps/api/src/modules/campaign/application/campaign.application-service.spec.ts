@@ -51,6 +51,8 @@ class RecordingRepository implements CampaignRepository {
       endDate: input.endDate?.toISOString() ?? null,
       effectiveStartDate: input.effectiveStartDate?.toISOString() ?? null,
       effectiveEndDate: input.effectiveEndDate?.toISOString() ?? null,
+      departureStartDate: input.departureStartDate?.toISOString() ?? null,
+      departureEndDate: input.departureEndDate?.toISOString() ?? null,
       levelCode: input.levelCode,
       levelLabel: null,
       levelRuleDescription: null,
@@ -92,6 +94,8 @@ class RecordingRepository implements CampaignRepository {
       endDate: input.endDate?.toISOString() ?? null,
       effectiveStartDate: input.effectiveStartDate?.toISOString() ?? null,
       effectiveEndDate: input.effectiveEndDate?.toISOString() ?? null,
+      departureStartDate: input.departureStartDate?.toISOString() ?? null,
+      departureEndDate: input.departureEndDate?.toISOString() ?? null,
       requestingUnit: input.requestingUnit ?? '',
       fieldValues: input.fieldValues,
       recordVersion: this.campaign.recordVersion + 1,
@@ -193,6 +197,19 @@ describe('CampaignApplicationService', () => {
     const updated = await service.update(created.id, { expectedVersion:created.recordVersion, startDate:'1999-12-31', effectiveStartDate:'2000-01-30' }, DEMO_ACTOR);
     expect(updated.startDate).toContain('1999-12-31');
     expect(repository.recordedActor?.key).toBe('demo-superuser');
+  });
+
+  it('persists departure dates independently and checks both draft and review commands', async () => {
+    const repository = new RecordingRepository();
+    const service = serviceFor(repository);
+    const created = await service.create({ name: 'Mở bán đường bay', levelCode: 'CLV_01',
+      effectiveStartDate: '2026-10-01', effectiveEndDate: '2026-10-31', departureStartDate: '2026-11-01', departureEndDate: '2027-03-31' }, DEMO_ACTOR);
+    expect(repository.lastCreateInput?.departureStartDate?.toISOString()).toContain('2026-11-01');
+    await expect(service.validateProposedUpdate(created.id, { expectedVersion: created.recordVersion,
+      departureStartDate: '2027-04-01' })).rejects.toThrow('Thời gian hiệu lực khởi hành');
+    await service.update(created.id, { expectedVersion: created.recordVersion, departureEndDate: '2027-04-30' }, DEMO_ACTOR);
+    expect(repository.lastUpdateInput?.departureEndDate?.toISOString()).toContain('2027-04-30');
+    expect(repository.lastUpdateInput?.effectiveEndDate?.toISOString()).toContain('2026-10-31');
   });
 
   it('returns one result per row when a batch is only partially valid', async () => {

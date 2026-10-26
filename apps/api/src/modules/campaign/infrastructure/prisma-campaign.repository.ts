@@ -123,6 +123,8 @@ function toSummary(campaign: CampaignRecord): CampaignSummary {
   const endDate = campaign.endDate?.toISOString().slice(0, 10) ?? null;
   const effectiveStartDate = campaign.effectiveStartDate?.toISOString().slice(0, 10) ?? null;
   const effectiveEndDate = campaign.effectiveEndDate?.toISOString().slice(0, 10) ?? null;
+  const departureStartDate = campaign.departureStartDate?.toISOString().slice(0, 10) ?? null;
+  const departureEndDate = campaign.departureEndDate?.toISOString().slice(0, 10) ?? null;
   const fieldValues = toFieldValues(campaign.fieldValues);
   const requestingUnit = campaign.requestingUnit ?? '';
   const workflow = campaign.workflow; const revision = workflow?.currentRevision;
@@ -153,6 +155,8 @@ function toSummary(campaign: CampaignRecord): CampaignSummary {
     endDate,
     effectiveStartDate,
     effectiveEndDate,
+    departureStartDate,
+    departureEndDate,
     levelCode: campaign.levelCode as CampaignLevelCode | null,
     levelLabel: campaign.level?.label ?? null,
     levelRuleDescription: campaign.level?.ruleDescription ?? null,
@@ -196,6 +200,8 @@ function toSummary(campaign: CampaignRecord): CampaignSummary {
       campaign_comm_end_date: endDate,
       campaign_effect_start_date: effectiveStartDate,
       campaign_effect_end_date: effectiveEndDate,
+      campaign_departure_start_date: departureStartDate,
+      campaign_departure_end_date: departureEndDate,
       campaign_effective_status: null,
       department_approval_state: approvalStepStatus(campaign, 'DEPARTMENT_APPROVAL'),
       department_approver_summary: departmentApprovers.map((person) => person.displayName).join('; ') || null,
@@ -266,6 +272,8 @@ export class PrismaCampaignRepository implements CampaignRepository {
           endDate: input.endDate,
           effectiveStartDate: input.effectiveStartDate,
           effectiveEndDate: input.effectiveEndDate,
+          departureStartDate: input.departureStartDate ?? null,
+          departureEndDate: input.departureEndDate ?? null,
           levelCode: input.levelCode,
           requestingEmployeeCode: input.requestingEmployeeCode,
           manualRequesterEmail: input.manualRequesterEmail,
@@ -348,6 +356,8 @@ export class PrismaCampaignRepository implements CampaignRepository {
           endDate: input.endDate,
           effectiveStartDate: input.effectiveStartDate,
           effectiveEndDate: input.effectiveEndDate,
+          departureStartDate: input.departureStartDate ?? null,
+          departureEndDate: input.departureEndDate ?? null,
           levelCode: input.levelCode,
           requestingEmployeeCode: input.requestingEmployeeCode,
           manualRequesterEmail: input.manualRequesterEmail,

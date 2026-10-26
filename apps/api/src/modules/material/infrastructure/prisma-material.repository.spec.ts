@@ -5,10 +5,10 @@ import { PrismaMaterialRepository } from './prisma-material.repository';
 
 describe('PrismaMaterialRepository', () => {
   it('uses create-only persistence for a new material so an ID collision cannot overwrite another row', async () => {
-    const create = vi.fn(async () => ({}));
+    const create = vi.fn(async () => ({ id: 'id', materialId: 'MTR-202610-A2C9T8', data: { material_name: 'Tư liệu' }, recordVersion: 1, isDeleted: false, updatedAt: new Date('2026-10-03T00:00:00Z') }));
     const update = vi.fn(async () => ({}));
     const transaction = {
-      materialRecord: { findMany: vi.fn(async () => []), create, update },
+      materialRecord: { findUnique: vi.fn(async () => null), create, update },
       auditEvent: { createMany: vi.fn(async () => ({})) },
     };
     const prisma = {

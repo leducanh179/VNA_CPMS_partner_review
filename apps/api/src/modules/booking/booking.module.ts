@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MaterialModule } from '../material/material.module';
 import { QcttPlanModule } from '../qctt-plan/qctt-plan.module';
 import { ContractsModule } from '../contracts/contracts.module';
 import { BookingCoreModule } from './booking-core.module';
@@ -10,5 +11,5 @@ import { BookingSetupRepository } from './application/booking-setup.repository';
 import { PrismaBookingSetupRepository } from './infrastructure/prisma-booking-setup.repository';
 import { BookingDelegationApplicationService } from './application/booking-delegation.application-service';
 import { HistoricalBookingImportApplicationService } from './application/historical-booking-import.application-service';
-@Module({imports:[ContractsModule,BookingCoreModule,IdentityModule,QcttPlanModule],providers:[BookingApplicationService,HistoricalBookingImportApplicationService,BookingDelegationApplicationService,BookingSetupApplicationService,{provide:BookingSetupRepository,useClass:PrismaBookingSetupRepository}],controllers:[BookingController],exports:[BookingApplicationService,BookingSetupApplicationService]})
+@Module({imports:[ContractsModule,BookingCoreModule,IdentityModule,QcttPlanModule,MaterialModule],providers:[BookingApplicationService,HistoricalBookingImportApplicationService,BookingDelegationApplicationService,BookingSetupApplicationService,{provide:BookingSetupRepository,useClass:PrismaBookingSetupRepository}],controllers:[BookingController],exports:[BookingApplicationService,BookingSetupApplicationService]})
 export class BookingModule {}

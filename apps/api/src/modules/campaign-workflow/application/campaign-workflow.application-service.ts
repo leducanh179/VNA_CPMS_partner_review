@@ -18,6 +18,10 @@ function functional(person: WorkflowPerson | undefined, role: string, orgId: str
       ? binding.scopeType === 'MODULE_ORG' && binding.orgId === orgId
       : binding.scopeType === 'SYSTEM' || binding.scopeType === 'MODULE' || (binding.scopeType === 'MODULE_ORG' && [person.departmentId, person.divisionId].includes(binding.orgId)) || (binding.scopeType === 'RECORD' && binding.campaignId === campaignId)));
 }
+export function canCooperateInDivision(person: WorkflowPerson | undefined, orgId: string, config: WorkflowConfiguration) {
+  return Boolean(person?.isActive && person.departmentId === config.commDepartmentId && person.divisionId === orgId &&
+    config.organizations.some((org) => org.id === orgId && org.kind === 'DIVISION' && org.parentId === config.commDepartmentId));
+}
 function policyFor(config: WorkflowConfiguration, campaignId: string) {
   const active = config.policies.filter((p) => p.effectiveFrom.getTime() <= Date.now()).sort((a, b) => b.version - a.version);
   const override = active.find((p) => p.campaignId === campaignId);
@@ -180,6 +184,13 @@ export class CampaignWorkflowApplicationService {
       if (!functional((await this.repository.people()).find((p) => p.id === personId), role, orgId, id, await this.repository.configuration())) blocked('Vai trò hoặc đơn vị người xử lý đã thay đổi trước khi hoàn tất.');
     });
   }
+  private cooperatorCheck(personId: string, orgId: string, people: WorkflowPerson[], config: WorkflowConfiguration) {
+    if (!canCooperateInDivision(people.find((person) => person.id === personId), orgId, config)) blocked('Người phối hợp phải là nhân sự đang hoạt động của Phòng được phân công.');
+    this.access.requireAtCommit(async () => {
+      if (!canCooperateInDivision((await this.repository.people()).find((person) => person.id === personId), orgId, await this.repository.configuration()))
+        blocked('Đơn vị hoặc trạng thái tài khoản người phối hợp đã thay đổi trước khi hoàn tất.');
+    });
+  }
   private directSuperadmin() {
     const identity = this.access.snapshot().identity;
     return identity.mode === 'DIRECT' && identity.effectiveSuperadmin;
@@ -218,7 +229,8 @@ export class CampaignWorkflowApplicationService {
       // and assignments remain readable; no new invitation is offered.
       const cooperationSourceOrgIds: string[] = [];
       const personIds = new Set([actor.id, ...facts.assignments.flatMap((p) => [p.actorId, p.assignedByActorId]), ...facts.revisions.flatMap((r) => [r.submittedByActorId, ...r.steps.flatMap((s) => [s.assigneeActorId, s.createdByActorId, s.decision?.actorId].filter((id): id is string => Boolean(id)))])]);
-      const eligible = people.filter((person) => ['DEPARTMENT_LEADER','DIVISION_LEADER','CAMPAIGN_MANAGER'].some((role) => functional(person, role, role === 'DEPARTMENT_LEADER' ? person.departmentId : person.divisionId ?? '', campaignId, config)));
+      const eligible = people.filter((person) => canCooperateInDivision(person, person.divisionId ?? '', config) ||
+        ['DEPARTMENT_LEADER','DIVISION_LEADER','CAMPAIGN_MANAGER'].some((role) => functional(person, role, role === 'DEPARTMENT_LEADER' ? person.departmentId : person.divisionId ?? '', campaignId, config)));
       return { campaign: { id: campaignId, code: facts.campaign.code, name: facts.campaign.name, recordVersion: facts.campaign.recordVersion, businessRevision: facts.campaign.businessRevision },
         version: facts.workflow?.recordVersion ?? 0, provenance: revision ? 'CURRENT' : 'LEGACY_UNASSESSED', revision: revision ?? null,
         history: facts.revisions, assignments: facts.assignments, cooperations: facts.cooperations,
@@ -227,6 +239,7 @@ export class CampaignWorkflowApplicationService {
         organizations: config.organizations.filter((org) => org.id === config.commDepartmentId || org.parentId === config.commDepartmentId),
         people: people.filter((p) => personIds.has(p.id) || ((canAssign || canManage) && eligible.includes(p))).map(({ id, displayName, employeeCode, email, departmentId, divisionId, isActive, jobTitle }) => ({ id, displayName, employeeCode, email, departmentId, divisionId, isActive, jobTitle })),
         candidates: (canAssign || canManage) ? eligible.map((p) => ({ actorId: p.id, divisionId: p.divisionId,
+          cooperatorEligible: canCooperateInDivision(p, p.divisionId ?? '', config),
           roles: ['DEPARTMENT_LEADER','DIVISION_LEADER','CAMPAIGN_MANAGER'].filter((role) => functional(p, role, role === 'DEPARTMENT_LEADER' ? p.departmentId : p.divisionId ?? '', campaignId, config)) })) : [],
         tasks: revision?.steps.map((step) => ({ ...step, assignmentOrgId: revision.route === 'DIVISION' && !revision.receivingDivisionId && step.orgId === config.commDepartmentId ? me?.divisionId ?? null : step.orgId,
           eligibility: this.taskEligibility(actor, step, revision, facts, resource, people, config),
@@ -319,6 +332,23 @@ export class CampaignWorkflowApplicationService {
       const orgIds = new Set(items.map((item) => item.orgId));
       return { items: items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()), policyVersion: this.access.snapshot().policyVersion,
         people: people.filter((p) => actorIds.has(p.id)).map(({ id, displayName }) => ({ id, displayName })), organizations: config.organizations.filter((o) => orgIds.has(o.id)) };
+    });
+  }
+
+  /** Preview routing for a proposed level without persisting the proposed record. */
+  previewAiSubmission(actor: ActorContext, campaignId: string, proposedLevel?: string | null) {
+    return this.access.run(actor, async () => {
+      this.access.require('campaign.submit', await this.access.campaign(campaignId));
+      const facts = await this.facts(campaignId), config = await this.repository.configuration();
+      const resolved = routeFor(config, { ...facts, campaign: { ...facts.campaign,
+        levelCode: proposedLevel === undefined ? facts.campaign.levelCode : proposedLevel } }, null);
+      const revision = current(facts);
+      if (facts.campaign.deletedAt || facts.workflow?.operationalState === 'CANCELLED' || revision && !['DRAFT','RETURNED','REJECTED','NEEDS_ROUTING','NEEDS_ASSIGNEE','CANCELLED'].includes(revision.state))
+        throw new ConflictException('Hồ sơ không ở trạng thái có thể gửi duyệt.');
+      if (resolved.routing.state === 'NEEDS_ROUTING') throw new BadRequestException('Chưa xác định được tuyến duyệt. Hãy hoàn thiện cấp độ và cấu hình phân công.');
+      return { workflowVersion: facts.workflow?.recordVersion ?? 0, policyId: resolved.policy.id, routing: resolved.routing,
+        label: resolved.routing.route === 'NONE' ? 'Chính sách hiện hành không yêu cầu phê duyệt; thao tác sẽ ghi nhận gửi theo chính sách này.' :
+          resolved.routing.route === 'DEPARTMENT' ? 'Gửi lãnh đạo Ban TT phê duyệt theo luồng hiện hành.' : 'Gửi lãnh đạo phòng thuộc Ban TT tiếp nhận/phân công theo luồng hiện hành.' };
     });
   }
 
@@ -507,7 +537,8 @@ export class CampaignWorkflowApplicationService {
     if (fixedResponsibility ? members.length !== 1 || members[0]!.responsibility !== fixedResponsibility : members.filter((m) => m.responsibility === 'LEAD').length !== 1) throw new BadRequestException('Cần đúng một người chủ trì trong phạm vi phân công.');
     for (const member of members) {
       if (orgId && member.orgId !== orgId) blocked('Không được phân công sang phạm vi phòng khác.');
-      this.leaderCheck(member.actorId, role, member.orgId, campaignId, people, config);
+      if (role === 'CAMPAIGN_MANAGER' && member.responsibility === 'COOP') this.cooperatorCheck(member.actorId, member.orgId, people, config);
+      else this.leaderCheck(member.actorId, role, member.orgId, campaignId, people, config);
     }
   }
 }

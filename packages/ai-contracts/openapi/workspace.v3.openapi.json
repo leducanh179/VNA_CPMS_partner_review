@@ -1,0 +1,343 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CPMS AI workspace",
+    "version": "3.0.0",
+    "description": "Additive to lookup v2: persisted artifacts (policyVersion, proposalId, questions, library exact links), admin policy/index and confirmed agent commands. AI_MODE defaults OFF. Existing 100000 VND ledger applies to every model call. CSRF is mandatory on POST."
+  },
+  "security": [
+    {
+      "localSession": []
+    }
+  ],
+  "paths": {
+    "/api/ai/workspace/settings": {
+      "get": {
+        "operationId": "getAiSettings",
+        "description": "Direct superadmin only: published/draft policy, versions and index status.",
+        "responses": {
+          "200": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    },
+    "/api/ai/workspace/settings/draft": {
+      "post": {
+        "operationId": "saveAiPolicyDraft",
+        "description": "Save a draft with expectedVersion; does not publish.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "policy"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "policy": {
+                    "$ref": "../schemas/workspace.v3.schema.json#/$defs/policy"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    },
+    "/api/ai/workspace/settings/publish": {
+      "post": {
+        "operationId": "publishAiPolicy",
+        "description": "Publish the saved draft or a selected prior version as a new version; audited optimistic lock.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "rollbackVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    },
+    "/api/ai/workspace/library/sync": {
+      "post": {
+        "operationId": "syncAiLibrary",
+        "description": "Direct superadmin: read DriveIndex with shared OAuth, validate then atomically replace metadata; failure preserves prior snapshot.",
+        "responses": {
+          "201": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    },
+    "/api/ai/workspace/library/test": {
+      "post": {
+        "operationId": "testAiLibraryDraft",
+        "description": "Direct superadmin: test structured draft filters against the current index, no model call.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/workspace.v3.schema.json#/$defs/libraryQuery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    },
+    "/api/ai/workspace/proposals/{id}": {
+      "get": {
+        "operationId": "getAiProposal",
+        "description": "Own completed conversation proposal; checks record/field visibility. No business writes.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    },
+    "/api/ai/workspace/proposals/{id}/revise": {
+      "post": {
+        "operationId": "reviseAiProposal",
+        "description": "Create a new immutable validated proposal and supersede the old one. No business writes.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/workspace.v3.schema.json#/$defs/changes"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    },
+    "/api/ai/workspace/proposals/{id}/confirm": {
+      "post": {
+        "operationId": "confirmAiProposal",
+        "description": "Exact pilot DIRECT only: explicit human confirmation; rechecks permissions, record/policy/routing versions; atomic save and optional SUBMIT via Application Services. Idempotent per proposal and action; never APPROVE.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/workspace.v3.schema.json#/$defs/confirm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful result; private no-store response."
+          },
+          "400": {
+            "description": "Invalid or unsupported input."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Session, pilot, feature or permission denied."
+          },
+          "404": {
+            "description": "Unavailable in this actor scope."
+          },
+          "409": {
+            "description": "Stale version or already used proposal with a different action."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "cpms_session"
+      }
+    }
+  }
+}

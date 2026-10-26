@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { bookingEffective, DEFAULT_QCTT_PLAN_COLUMNS, QCTT_PLAN_FIELDS, emptyQcttPlanFields, matchingPlanItems, projectPlanBookings,
-  type ActorContext, type BookingContext, type BookingView, type QcttPlanFields, type QcttPlanItem, type QcttPlanView, type QcttPlanTarget } from '@cpms/domain';
+  qcttPlanColumnHasData, type ActorContext, type BookingContext, type BookingView, type QcttPlanFields, type QcttPlanItem, type QcttPlanView, type QcttPlanTarget } from '@cpms/domain';
 import { AccessApplicationService } from '../../access/application/access.application-service';
 import { ContractsRepository } from '../../contracts/application/contracts.repository';
 import { QcttPlanRepository } from './qctt-plan.repository';
@@ -53,10 +53,21 @@ export class QcttPlanApplicationService {
       const receipt = await this.repository.receipt(who.id, input.idempotencyKey);
       if (receipt) { if (receipt.digest !== digest) throw new ConflictException('Mã thao tác đã dùng cho nội dung khác.'); return receipt.result; }
       const state = await this.repository.state(campaignId), items = await this.repository.items(campaignId);
-      if (input.action === 'COLUMNS') {
+      if (input.action === 'REORDER') {
+        if (!state || state.recordVersion !== input.expectedVersion) throw new ConflictException('Kế hoạch đã thay đổi. Tải lại trước khi sắp xếp.');
+        const active = items.filter(item => !item.deletedAt);
+        if (new Set(input.itemIds).size !== input.itemIds.length || input.itemIds.length !== active.length || input.itemIds.some(id => !active.some(item => item.id === id))) throw new BadRequestException('Thứ tự phải chứa đúng các dòng còn hiệu lực của kế hoạch.');
+        const timestamp = new Date().toISOString();
+        for (const [index, id] of input.itemIds.entries()) {
+          const before = active.find(item => item.id === id)!, position = active[index]!.sortOrder;
+          if (before.sortOrder === position) continue;
+          await this.repository.save({ ...before, sortOrder: position, recordVersion: before.recordVersion + 1, updatedAt: timestamp }, before, who, 'plan.item.reorder');
+        }
+      } else if (input.action === 'COLUMNS') {
         if ((state?.recordVersion ?? 0) !== input.expectedVersion) throw new ConflictException('Bố cục kế hoạch đã thay đổi. Tải lại trước khi lưu.');
         const keys = input.columns.map(c => c.key);
-        if (new Set(keys).size !== keys.length || input.columns.some(c => !QCTT_PLAN_FIELDS.includes(c.key as typeof QCTT_PLAN_FIELDS[number]) && !(c.key.startsWith('custom:') && z.string().uuid().safeParse(c.key.slice(7)).success))) throw new BadRequestException('Cột kế hoạch không hợp lệ hoặc bị trùng.');
+        if (new Set(keys).size !== keys.length || input.columns.some(c => !QCTT_PLAN_FIELDS.includes(c.key as typeof QCTT_PLAN_FIELDS[number]) && !(/^(custom|blank):/.test(c.key) && z.string().uuid().safeParse(c.key.slice(c.key.indexOf(':') + 1)).success))) throw new BadRequestException('Cột kế hoạch không hợp lệ hoặc bị trùng.');
+        if ((state?.columns ?? DEFAULT_QCTT_PLAN_COLUMNS).some(column => !keys.includes(column.key) && qcttPlanColumnHasData(items, column.key))) throw new BadRequestException('Cột đã có dữ liệu: giữ trường hiện tại và thêm cột mới. Có thể ẩn cột mà không xóa dữ liệu.');
         await this.repository.ensure(campaignId, who);
         await this.repository.setColumns(campaignId, state?.recordVersion ?? 1, input.columns as typeof DEFAULT_QCTT_PLAN_COLUMNS, who);
       } else {
@@ -73,6 +84,7 @@ export class QcttPlanApplicationService {
           let next: QcttPlanItem;
           const linked = before ? bookings.filter(b => b.planItemId === before.id || bookingEffective(b)?.planItemId === before.id) : [];
           if (input.action === 'SAVE' && 'fields' in entry) {
+            if (before && entry.position !== undefined) throw new BadRequestException('Vị trí chèn chỉ dành cho dòng mới.');
             if (before?.deletedAt) throw new BadRequestException('Phục hồi dòng trước khi sửa.');
             const fields: QcttPlanFields = { ...entry.fields, customValues: {} };
             const customValues: NonNullable<QcttPlanFields['customValues']> = {};
@@ -101,8 +113,16 @@ export class QcttPlanApplicationService {
             }
             if (linked.length && before && (changed || fields.departmentId !== before.departmentId || fields.customValues?.departmentId !== before.customValues?.departmentId)) throw new BadRequestException('Dòng đã có booking: chuyển các booking sang dòng phù hợp trước khi đổi phân loại hoặc phòng.');
             if (fields.progress === 'STOPPED' && linked.some(b => !b.deletedAt && !['CANCELLED','FINISHED'].includes(b.execution ?? ''))) throw new BadRequestException('Dòng còn booking đang thực hiện hoặc đề nghị. Xử lý booking trước khi ngừng hoạt động.');
+            if (!before && entry.position !== undefined) {
+              for (const existing of items.filter(item => item.sortOrder >= entry.position!).sort((a, b) => b.sortOrder - a.sortOrder)) {
+                const shifted = { ...existing, sortOrder: existing.sortOrder + 1, recordVersion: existing.recordVersion + 1, updatedAt: timestamp };
+                await this.repository.save(shifted, existing, who, 'plan.item.insert_shift');
+                items[items.findIndex(item => item.id === existing.id)] = shifted;
+              }
+              sortOrder = Math.max(sortOrder, ...items.map(item => item.sortOrder));
+            }
             next = { ...fields, id: before?.id ?? randomUUID(), campaignId, classification, recordVersion: (before?.recordVersion ?? 0) + 1,
-              sortOrder: before?.sortOrder ?? ++sortOrder, origin: before?.origin ?? 'MANUAL', deletedAt: null,
+              sortOrder: before?.sortOrder ?? entry.position ?? ++sortOrder, origin: before?.origin ?? 'MANUAL', deletedAt: null,
               createdByActorId: before?.createdByActorId ?? who.id, createdAt: before?.createdAt ?? timestamp, updatedAt: timestamp };
           } else {
             if (!before) throw new NotFoundException('Không tìm thấy dòng kế hoạch.');
@@ -111,6 +131,8 @@ export class QcttPlanApplicationService {
             next = { ...before, deletedAt: input.action === 'DELETE' ? timestamp : null, recordVersion: before.recordVersion + 1, updatedAt: timestamp };
           }
           await this.repository.save(next, before ?? null, who, `plan.item.${input.action.toLowerCase()}`);
+          sortOrder = Math.max(sortOrder, next.sortOrder);
+          const at = items.findIndex(item => item.id === next.id); if (at < 0) items.push(next); else items[at] = next;
         }
       }
       const result = { campaignId, state: await this.repository.state(campaignId) };

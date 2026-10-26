@@ -1,5 +1,5 @@
 import type { CampaignSummary } from '@cpms/domain';
-import { Button, Card, CpmsIcon, LoadingBlock, StatusBadge } from '@cpms/ui';
+import { Button, Card, CpmsIcon, LoadingBlock } from '@cpms/ui';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth-context';
 import { requestJson } from '../lib/api';
@@ -10,6 +10,7 @@ import { useUnsavedChanges } from '../lib/unsaved-changes';
 import { useCampaignOperations } from '../lib/use-campaign-operations';
 import { CampaignPendingRequestReview } from './campaign-operations-workspace';
 import { CampaignWorkflowWorkspace, WorkflowCommandEditor } from './campaign-workflow-workspace';
+import { CampaignStatusHighlight } from './campaign-status-highlight';
 
 interface CampaignApprovalWorkspaceProps {
   campaign: CampaignSummary;
@@ -125,11 +126,10 @@ export function CampaignApprovalWorkspace({ campaign, onNavigateInformation, onS
       <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-4 lg:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950"><CpmsIcon name="approve" />Tình trạng phê duyệt hiện tại</h2>
-          <StatusBadge>{campaign.pendingChangeLabel || currentStatus}</StatusBadge>
         </div>
       </div>
       <div className="grid gap-4 p-5 sm:grid-cols-3 lg:p-6">
-        <SummaryField label="Tình trạng" value={[currentStatus, campaign.pendingChangeLabel].filter(Boolean).join(' · ')} />
+        <CampaignStatusHighlight campaign={campaign} status={currentStatus} label="Tình trạng" />
         <SummaryField label="Người yêu cầu" value={requester} />
         <SummaryField label="CQ, ĐV yêu cầu" value={requestingUnits} />
       </div>

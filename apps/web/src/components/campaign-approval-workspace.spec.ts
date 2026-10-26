@@ -53,7 +53,8 @@ describe('Campaign approval tab after initial approval', () => {
     expect(html).toContain('Phê duyệt yêu cầu</button>');
     expect(html).toContain('Từ chối yêu cầu</button>');
     expect(html.indexOf('Phê duyệt yêu cầu</button>')).toBeLessThan(html.indexOf('Lịch sử yêu cầu và phê duyệt'));
-    expect(html).toContain('Đã phê duyệt · Chờ duyệt tạm dừng');
+    expect(html).toContain('Đã phê duyệt');
+    expect(html).toContain('Chờ duyệt tạm dừng');
     expect(html).not.toContain('Giao nhiệm vụ phụ trách chính');
   });
 

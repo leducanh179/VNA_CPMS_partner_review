@@ -34,6 +34,12 @@ export abstract class CampaignV2OptionalFieldsDto {
   @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional() @IsDateString({ strict: true }) effectiveEndDate?: string | null;
 
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
+  @IsOptional() @IsDateString({ strict: true }) departureStartDate?: string | null;
+
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
+  @IsOptional() @IsDateString({ strict: true }) departureEndDate?: string | null;
+
   @ApiPropertyOptional({ type: String, nullable: true })
   @IsOptional() @IsString() @MaxLength(80) requestingEmployeeCode?: string | null;
 

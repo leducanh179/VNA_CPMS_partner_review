@@ -1,8 +1,12 @@
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ValidateNested } from 'class-validator';
+import type { MaterialBatchSaveItem } from '@cpms/domain';
 
 export class BatchSaveMaterialItemDto {
+  @IsOptional()
+  @IsObject()
+  sharing?: NonNullable<MaterialBatchSaveItem['sharing']>;
   @IsString()
   @MaxLength(120)
   clientKey!: string;

@@ -18,7 +18,7 @@ export interface WorkflowCooperation { id: string; sourceOrgId: string; targetOr
 export interface WorkflowView { campaign: { id: string; code: string; name: string; recordVersion: number; businessRevision: number }; version: number; provenance: string;
   revision: WorkflowRevision | null; history: WorkflowRevision[]; assignments: WorkflowAssignment[]; cooperations: WorkflowCooperation[];
   policy: WorkflowPolicy | null; currentPolicy: WorkflowPolicy | null; organizations: WorkflowOrganization[]; people: WorkflowPerson[];
-  candidates: { actorId: string; divisionId: string | null; roles: string[] }[]; tasks: WorkflowStep[];
+  candidates: { actorId: string; divisionId: string | null; roles: string[]; cooperatorEligible: boolean }[]; tasks: WorkflowStep[];
   capabilities: { submit: boolean; assign: boolean; policy: boolean; cooperate: boolean; withdraw: boolean; reviewChanges?: boolean };
   reassignableScopes: { orgId: string; functionalRole: string }[]; cooperationSourceOrgIds: string[];
   planning: { implemented: boolean; label: string }; internalDemoNotice: string }

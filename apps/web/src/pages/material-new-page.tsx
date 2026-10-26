@@ -15,19 +15,22 @@ import {
   type MaterialSupplementaryLink,
 } from '@cpms/domain';
 import { Card, CpmsIcon } from '@cpms/ui';
-import { useAccessCapabilities } from '../access-context';
+import { useFormDraftAccess } from '../access-context';
+import { useAuth } from '../auth-context';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CampaignRichTextEditor } from '../components/campaign-rich-text-editor';
 import { CampaignDetailDock } from '../components/campaign-detail-dock';
-import { batchSaveMaterials, bulkMaterialAction, getMarketRegions, getMaterialBootstrap, getMaterials, requestJson } from '../lib/api';
+import { batchSaveMaterials, bulkMaterialAction, getMarketRegions, getMaterialBootstrap, requestJson } from '../lib/api';
 import { materialDescription, materialFormGroup, materialFormLinks, materialFormReferences, materialRichText, inheritedMaterialMarkets, materialTitleSuggestion } from '../lib/material-form';
 import { navigate, registerPendingNavigationGuard } from '../lib/router';
 import { useUnsavedChanges } from '../lib/unsaved-changes';
+import { MaterialSharingDialog, MaterialSharingEditor, newMaterialSharing, type SharingSelection } from '../components/material-sharing';
+import { MATERIAL_SHARING_LABELS } from '@cpms/domain';
 
 const inputClass = 'mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-vna-blue focus:ring-4 focus:ring-cyan-100';
 const emptyFields: MaterialFields = {
   status: 'Undone', material_publish: 'Not published', submission_status: 'BOOKED', approval_status: 'BOOKED',
-  publish_status: 'NOT_PUBLISHED', workflow_state: 'DRAFT', visibility: 'INTERNAL', source: 'WEB_APP', is_deleted: 'FALSE',
+  publish_status: 'NOT_PUBLISHED', workflow_state: 'DRAFT', source: 'WEB_APP', is_deleted: 'FALSE',
 };
 
 interface MaterialFormDraft {
@@ -37,6 +40,7 @@ interface MaterialFormDraft {
 }
 
 interface MaterialDraftValue extends Record<string, unknown> {
+  sharing?: SharingSelection;
   materialId: string | null;
   title: string;
   fields: MaterialFields;
@@ -67,8 +71,11 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
   const draftExists = useRef(false);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const finishing = useRef(false);
-  const capabilities = useAccessCapabilities();
+  const canOpenForm = useFormDraftAccess('material');
+  const partnerDemo = useAuth().me.account.accountKind === 'PARTNER_DEMO';
   const [record, setRecord] = useState<MaterialSummary | null>(null);
+  const [sharing, setSharing] = useState<SharingSelection>(newMaterialSharing);
+  const [sharingOpen, setSharingOpen] = useState(false);
   const [fields, setFields] = useState<MaterialFields>({ ...emptyFields });
   const [bootstrap, setBootstrap] = useState<MaterialPortalBootstrap | null>(null);
   const [markets, setMarkets] = useState<MarketRegionCatalogResponse | null>(null);
@@ -93,7 +100,7 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
   useEffect(() => {
     let active = true;
     setLoading(true);
-    void Promise.all([getMaterialBootstrap(), getMarketRegions(), id ? getMaterials() : Promise.resolve([]), requestedDraftId ? requestJson<MaterialFormDraft>(`/material-form-drafts/${encodeURIComponent(requestedDraftId)}`) : Promise.resolve(null)]).then(([referenceData, marketData, records, draft]) => {
+    void Promise.all([getMaterialBootstrap(), getMarketRegions(), id ? requestJson<MaterialSummary>(`/materials/${encodeURIComponent(id)}`).then(value => [value]) : Promise.resolve([]), requestedDraftId ? requestJson<MaterialFormDraft>(`/material-form-drafts/${encodeURIComponent(requestedDraftId)}`) : Promise.resolve(null)]).then(([referenceData, marketData, records, draft]) => {
       if (!active) return;
       const current = id ? records.find((candidate) => candidate.materialId === id || candidate.id === id) : undefined;
       if (id && !current) throw new Error('Không tìm thấy tư liệu cần sửa.');
@@ -117,6 +124,7 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
         draftVersion.current = draft.recordVersion;
         draftExists.current = true;
         const value = draft.formData;
+        if (!current) setSharing(value.sharing || newMaterialSharing());
         setFields({ ...emptyFields, ...value.fields });
         setReferences(value.references || []);
         setReferencesTouched(Boolean(value.referencesTouched));
@@ -140,11 +148,11 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
   const titleSuggestion = materialTitleSuggestion(fields.material_type, fields.material_type_other, references);
   const title = titleEdited ? (fields.material_name || '') : titleSuggestion;
   const selectedMarketCodes = record && !referencesTouched ? (fields.market_codes || '').split(',').map((code) => code.trim()).filter(Boolean) : selectedCampaign?.market_codes || manualMarkets;
-  const locked = Boolean(record?.isDeleted) || !capabilities[id ? 'material.update' : 'material.create'];
+  const locked = Boolean(record?.isDeleted) || !(id ? record?.capabilities?.edit : canOpenForm);
   const filteredCampaigns = (bootstrap?.campaigns || []).filter((campaign) =>
     `${campaign.campaign_code} ${campaign.campaign_name}`.toLocaleLowerCase('vi').includes(campaignQuery.trim().toLocaleLowerCase('vi'))).slice(0, 30);
 
-  const draftValue: MaterialDraftValue = { materialId: record?.id || null, title, fields, references, referencesTouched, otherCampaignSelected, customCampaign, titleEdited, group, legacyLinks, description, manualMarkets };
+  const draftValue: MaterialDraftValue = { materialId: record?.id || null, title, fields, references, referencesTouched, otherCampaignSelected, customCampaign, titleEdited, group, legacyLinks, description, manualMarkets, sharing };
   const draftSnapshot = JSON.stringify(draftValue);
   const latestDraftSnapshot = useRef(draftSnapshot);
   latestDraftSnapshot.current = draftSnapshot;
@@ -238,7 +246,7 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
   };
 
   const save = async () => {
-    if (!bootstrap || locked || saving) return;
+    if (!bootstrap || locked || saving || partnerDemo) return;
     if (!references.length) return setError('Hãy chọn ít nhất một Chiến dịch hoặc thêm Chiến dịch Khác.');
     if (otherCampaignSelected && !customCampaign.trim()) return setError('Hãy nhập tên Chiến dịch Khác trước khi lưu.');
     if (!group) return setError('Hãy chọn Nhóm tư liệu.');
@@ -253,6 +261,7 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
       market_codes: selectedMarketCodes.join(','),
       ...(!record || referencesTouched ? { campaign_refs: JSON.stringify(references) } : {}),
     };
+    if (!record) delete nextFields.visibility; // Private drafts saved before sharing existed may carry this legacy field.
     setSaving(true);
     setError(null);
     finishing.current = true;
@@ -260,7 +269,7 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
       await saveQueue.current;
       const result = await batchSaveMaterials([{
         clientKey: `material-form-${crypto.randomUUID()}`, fields: nextFields,
-        ...(record ? { materialId: record.materialId, expectedVersion: record.recordVersion, baselineFields: record.fields } : {}),
+        ...(record ? { materialId: record.materialId, expectedVersion: record.recordVersion, baselineFields: record.fields } : { sharing }),
       }]);
       const item = result.items[0];
       if (!item?.ok) throw new Error(item?.message || 'Không lưu được tư liệu.');
@@ -288,7 +297,7 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
       const result = await bulkMaterialAction([{ materialId: record.materialId, expectedVersion: record.recordVersion }], action);
       const item = result.items[0];
       if (!item?.ok) throw new Error(item?.message || 'Không đổi được tình trạng xuất bản.');
-      const refreshed = (await getMaterials()).find((candidate) => candidate.materialId === record.materialId);
+      const refreshed = await requestJson<MaterialSummary>(`/materials/${encodeURIComponent(record.materialId)}`);
       if (refreshed) { setRecord(refreshed); setFields({ ...refreshed.fields }); }
       notify(`Đã cập nhật: ${MATERIAL_PUBLICATION_LABELS[status]}.`);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Không đổi được tình trạng xuất bản.'); }
@@ -304,12 +313,19 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={saving || draftSaving || loading} onClick={() => void closeForm()}><CpmsIcon name="back" />Về danh sách</button>
         <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-vna-blue hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-40" disabled={!touched || saving || draftSaving || locked || loading} onClick={() => void saveDraftNow()}><CpmsIcon name="save" />Lưu nháp</button>
-        <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-vna-blue px-4 text-sm font-semibold text-white disabled:opacity-40" disabled={saving || draftSaving || locked || loading} onClick={() => void save()}><CpmsIcon name="save" />{saving ? 'Đang lưu…' : 'Lưu tư liệu'}</button>
+        <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-vna-blue px-4 text-sm font-semibold text-white disabled:opacity-40" disabled={partnerDemo || saving || draftSaving || locked || loading} onClick={() => void save()}><CpmsIcon name="save" />{saving ? 'Đang lưu…' : 'Lưu tư liệu'}</button>
       </div>
     </Card></CampaignDetailDock>
     {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">{error}</div> : null}
     {loading ? <p className="rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-500">Đang tải dữ liệu tư liệu…</p> : null}
     {!loading && bootstrap ? <div className="space-y-5">
+      <MaterialFormSection title="Phạm vi truy cập" description="Chia sẻ tư liệu độc lập với tình trạng xuất bản. Bản nhập dở luôn là riêng tư." icon="users">
+        {record ? <div className="flex flex-wrap items-center justify-between gap-3"><span>{MATERIAL_SHARING_LABELS[record.sharing?.mode || 'LEGACY']}</span>
+          {record.capabilities?.manageSharing && <button type="button" className="rounded-xl border px-4 py-2 text-sm font-semibold text-vna-blue disabled:opacity-40" disabled={touched || saving} title={touched ? 'Lưu nội dung trước khi đổi chia sẻ' : 'Quản lý chia sẻ'} onClick={() => setSharingOpen(true)}>Chia sẻ</button>}
+          {record.sharing?.mode === 'SHARED' && <a className="text-sm text-vna-blue underline" href={`/public/materials/${encodeURIComponent(record.materialId)}`} target="_blank" rel="noreferrer">Mở trang dùng chung</a>}
+        </div> : <fieldset disabled={locked || saving}><MaterialSharingEditor value={sharing} onChange={value => { setSharing(value); setTouched(true); }} campaigns={bootstrap.campaigns} suggestedIds={references.filter(ref => ref.kind === 'SYSTEM').map(ref => ref.id)}/></fieldset>}
+      </MaterialFormSection>
+      {sharingOpen && record && <MaterialSharingDialog record={record} campaigns={bootstrap.campaigns} onClose={() => setSharingOpen(false)} onSaved={value => { setRecord(value); setFields({ ...value.fields }); notify('Đã cập nhật chia sẻ.'); if (!value.capabilities?.view) navigate('/materials', false, true); }}/>}
       <fieldset disabled={Boolean(locked) || saving} className="space-y-5">
         <MaterialFormSection title="Chiến dịch sử dụng tư liệu" description="Chọn một hoặc nhiều Chiến dịch; mục Khác chỉ lưu tên tạm cùng tư liệu." icon="campaign">
           <div className="grid gap-5 lg:grid-cols-2">
@@ -349,7 +365,7 @@ function MaterialRecordPage({ id, notify }: { id?: string; notify(message: strin
       </fieldset>
 
       <MaterialFormSection title="Lưu trữ và xuất bản" description="Ngày cập nhật có thể sửa; thời điểm tạo, các lần chỉnh sửa và người thực hiện được hệ thống ghi vào lịch sử." icon="info">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><Field label="Mã tư liệu"><input className={`${inputClass} bg-slate-50 font-mono`} value={record?.materialId || 'Tự sinh khi lưu'} readOnly /></Field><Field label="Ngày cập nhật"><input className={inputClass} type="date" value={fields.material_update_date || (fields.created_at ? new Date(fields.created_at).toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }) : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }))} disabled={Boolean(locked) || saving} onChange={(event) => change('material_update_date', event.target.value)} /></Field><Field label="Tình trạng xuất bản"><select className={inputClass} value={fields.publish_status || 'NOT_PUBLISHED'} disabled={!record || !capabilities['material.publish'] || saving || touched} onChange={(event) => void changePublication(event.target.value)}>{Object.entries(MATERIAL_PUBLICATION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field></div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><Field label="Mã tư liệu"><input className={`${inputClass} bg-slate-50 font-mono`} value={record?.materialId || 'Tự sinh khi lưu'} readOnly /></Field><Field label="Ngày cập nhật"><input className={inputClass} type="date" value={fields.material_update_date || (fields.created_at ? new Date(fields.created_at).toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }) : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }))} disabled={Boolean(locked) || saving} onChange={(event) => change('material_update_date', event.target.value)} /></Field><Field label="Tình trạng xuất bản"><select className={inputClass} value={fields.publish_status || 'NOT_PUBLISHED'} disabled={!record?.capabilities?.publish || saving || touched} onChange={(event) => void changePublication(event.target.value)}>{Object.entries(MATERIAL_PUBLICATION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field></div>
         {record?.isDeleted ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">Tư liệu nằm trong Thùng rác; hãy phục hồi trước khi sửa.</p> : null}
       </MaterialFormSection>
     </div> : null}

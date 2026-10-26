@@ -12,7 +12,7 @@ describe('material grid', () => {
     expect(keys).not.toContain('completion_date');
     expect(keys).not.toContain('contract_ids');
     expect(keys).not.toContain('version');
-    expect(DEFAULT_MATERIAL_COLUMNS).toEqual(['material_update_date', 'campaign', 'material_name', 'material_type', 'publish_status', 'material_link', 'material_description_rich_text', 'note']);
+    expect(DEFAULT_MATERIAL_COLUMNS).toEqual(['material_update_date', 'campaign', 'material_name', 'material_link', 'material_type', 'publish_status', 'material_description_rich_text', 'note']);
     expect(keys).not.toContain('supplementary_links');
     expect(keys).not.toContain('supplementary_link_1');
     expect(keys).not.toContain('supplementary_link_2');

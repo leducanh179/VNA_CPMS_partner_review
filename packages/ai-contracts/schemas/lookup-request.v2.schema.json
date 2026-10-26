@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:cpms:ai:lookup-request:2",
+  "title": "CPMS AI lookup request v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "question",
+    "previousId"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1600
+    },
+    "conversationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid",
+      "default": null
+    },
+    "previousId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "context": {
+      "$ref": "lookup-context.v2.schema.json"
+    }
+  }
+}

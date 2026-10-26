@@ -1,3 +1,5 @@
+import type { MaterialSharing, MaterialCapabilities } from './material-sharing';
+
 export const MATERIAL_FIELD_KEYS = [
   'campaign', 'material_type', 'material_name', 'version', 'market_codes',
   'material_link', 'supplementary_link', 'status', 'material_publish', 'note',
@@ -100,6 +102,8 @@ export function inferMaterialGroup(type: string | null | undefined): MaterialGro
 }
 
 export interface MaterialSummary {
+  sharing?: MaterialSharing;
+  capabilities?: MaterialCapabilities;
   id: string;
   materialId: string;
   fields: MaterialFields;
@@ -130,6 +134,8 @@ export interface MaterialJournalItem {
 }
 
 export interface MaterialBatchSaveItem {
+  /** Accepted on creation only; updates use the separately authorized sharing command. */
+  sharing?: Pick<MaterialSharing, 'mode' | 'campaignIds' | 'grants'>;
   clientKey: string;
   materialId?: string;
   expectedVersion?: number;
@@ -138,6 +144,7 @@ export interface MaterialBatchSaveItem {
 }
 
 export interface MaterialBatchItemResult {
+  replayed?: boolean;
   clientKey: string;
   materialId?: string;
   ok: boolean;
@@ -171,7 +178,7 @@ export interface MaterialPortalBootstrap {
   users: readonly Record<string, string>[];
   fieldRules: readonly Record<string, string>[];
   roleRules: readonly Record<string, string>[];
-  campaigns: readonly { campaign_id: string; campaign_code: string; campaign_name: string; market_codes: string[] }[];
+  campaigns: readonly { campaign_id: string; campaign_code: string; campaign_name: string; market_codes: string[]; effectiveStartDate?: string | null; effectiveEndDate?: string | null; departureStartDate?: string | null; departureEndDate?: string | null }[];
   options: {
     materialTypes: string[];
     statuses: string[];

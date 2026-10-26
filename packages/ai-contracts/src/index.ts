@@ -1,4 +1,6 @@
-export const AI_MODES = ['OFF', 'MOCK'] as const;
+export * from './lookup';
+export * from './workspace';
+export const AI_MODES = ['OFF', 'MOCK', 'OPENAI'] as const;
 export type AiMode = (typeof AI_MODES)[number];
 
 export interface CampaignIntakeRequest {

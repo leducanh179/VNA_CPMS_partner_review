@@ -280,6 +280,12 @@ export class GoogleIntegrationApplicationService {
     });
   }
 
+  /** Read-only library import using the administrator's existing shared Drive connection. */
+  async readAiLibrary(actor: ActorContext, spreadsheetId: string) {
+    if (!/^[A-Za-z0-9_-]{10,150}$/.test(spreadsheetId)) throw new BadRequestException('ID thư viện không hợp lệ.');
+    return this.withDriveAccessToken(actor, token => this.sheets.readTab(token, spreadsheetId, 'DriveIndex', { purpose: 'AI_LIBRARY' }));
+  }
+
   private requireReference(value: string) {
     const reference = parseGoogleSpreadsheetUrl(value);
     if (!reference) throw new BadRequestException('URL Google Sheets không hợp lệ. Chỉ chấp nhận https://docs.google.com/spreadsheets/d/...');

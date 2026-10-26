@@ -12,7 +12,8 @@ import type {
 import { canonicalCampaignFieldKey, isProtectedCampaignField } from '@cpms/domain';
 import { Button, Card, CpmsIcon, LoadingBlock, StatusBadge } from '@cpms/ui';
 import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useAccessCapabilities } from '../access-context';
+import { useAccessCapabilities, useFormDraftAccess } from '../access-context';
+import { useAuth } from '../auth-context';
 import {
   findSimilarCampaigns,
   getCampaignLevels,
@@ -85,7 +86,9 @@ const FormFieldAccess = createContext<(keys: string[]) => boolean>(() => false);
 
 export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignRecordFormProps>(function CampaignRecordForm({ campaign, initialDraftValue, onAutoSave, onExit, onDiscardDraft, saving, error, onPersist, onSubmitToComm, saveLabel, successMessage, onDuplicate, onMoveToTrash, onDeletePermanently, showDriveWorkspace = true, showSaveBar = true, saveBarAtTop = false, onDirtyChange, notify }, ref) {
   const capabilities = useAccessCapabilities();
-  const canEdit = (keys: string[]) => keys.every((key) => !isProtectedCampaignField(key) && (campaign ? campaign.access?.editableFields.includes(canonicalCampaignFieldKey(key)) === true : capabilities['campaign.create'] === true));
+  const partnerDemo = useAuth().me.account.accountKind === 'PARTNER_DEMO';
+  const canEnterDraft = useFormDraftAccess('campaign') && !campaign;
+  const canEdit = (keys: string[]) => keys.every((key) => !isProtectedCampaignField(key) && (campaign ? campaign.access?.editableFields.includes(canonicalCampaignFieldKey(key)) === true : canEnterDraft));
   const canSave = campaign ? !campaign.isDeleted && campaign.access?.canEditAnyField === true : capabilities['campaign.create'] === true;
   const initial = useMemo(() => initialDraftValue ?? campaignRecordValue(campaign), [campaign, initialDraftValue]);
   const [value, setValue] = useState(initial);
@@ -100,7 +103,7 @@ export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignR
   const [personnel, setPersonnel] = useState<PersonnelDirectoryCatalogItem[]>([]);
   const [personnelOpen, setPersonnelOpen] = useState(false);
   const [selectedPersonnelName, setSelectedPersonnelName] = useState(campaign?.requestingEmployeeName ?? '');
-  const [requesterMode, setRequesterMode] = useState<'DIRECTORY' | 'EMAIL'>(initial.manualRequesterEmail ? 'EMAIL' : 'DIRECTORY');
+  const [requesterMode, setRequesterMode] = useState<'DIRECTORY' | 'EMAIL'>(initial.manualRequesterEmail || partnerDemo ? 'EMAIL' : 'DIRECTORY');
   const [similar, setSimilar] = useState<SimilarCampaignSummary[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
   const [unitQuery, setUnitQuery] = useState('');
@@ -183,6 +186,7 @@ export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignR
   }, [catalogRevision]);
 
   useEffect(() => {
+    if (partnerDemo) return;
     let active = true;
     const timer = window.setTimeout(() => {
       void getPersonnel(personnelQuery.trim()).then((rows) => {
@@ -192,7 +196,7 @@ export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignR
       });
     }, 250);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [personnelQuery]);
+  }, [personnelQuery, partnerDemo]);
 
   useEffect(() => {
     let active = true;
@@ -382,6 +386,7 @@ export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignR
     <div className="flex flex-wrap items-center gap-2">
       {onAutoSave ? <span className={`text-xs ${autoSaveState === 'error' ? 'text-rose-700' : 'text-slate-500'}`} role="status">{autoSaveState === 'saving' ? 'Đang lưu bản nhập dở…' : autoSaveState === 'saved' ? 'Đã lưu tự động' : autoSaveState === 'error' ? 'Chưa lưu được bản nhập dở. Hãy thử lại trước khi rời trang.' : 'Bản nhập dở sẽ được lưu tự động'}</span> : null}
       <Button variant="secondary" className="gap-2" disabled={saving} onClick={() => onExit ? void onExit() : navigate('/campaigns')}><CpmsIcon name="back" />{onExit ? 'Về danh sách' : 'Hủy'}</Button>
+      {canEnterDraft && !canSave && onAutoSave && <Button variant="secondary" disabled={saving} onClick={() => void onAutoSave(value).then(() => notify('Đã lưu bản nhập dở riêng.')).catch(() => notify('Chưa lưu được bản nhập dở.'))}>Lưu bản nhập dở</Button>}
       {onDiscardDraft ? <Button variant="secondary" disabled={saving} onClick={() => void onDiscardDraft()}>Bỏ bản nhập dở</Button> : null}
       <Button variant={!campaign && onSubmitToComm ? 'secondary' : 'primary'} className="gap-2" disabled={!canSaveCampaignRecord({ existingCampaign: Boolean(campaign), dirty, saving, authorized: canSave, name: value.name, levelCode: value.levelCode })} onClick={() => void persist()}><CpmsIcon name="save" />{saving ? 'Đang lưu…' : saveLabel ?? (campaign ? 'Lưu thay đổi' : 'Lưu nháp')}</Button>
       {onSubmitToComm && (!campaign || campaign.lifecycleState === 'DRAFT') && <Button disabled={saving || !canSave || Boolean(campaign && (dirty || !campaign.access?.permissions['campaign.submit']))} title={campaign && dirty ? 'Hãy lưu thay đổi trước khi gửi Ban TT' : undefined} onClick={() => void persist(true)}><CpmsIcon name="approve" />{campaign ? 'Gửi Ban TT' : 'Tạo và gửi Ban TT'}</Button>}
@@ -398,8 +403,8 @@ export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignR
         <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><CpmsIcon name="warning" className="mt-0.5 shrink-0" /><div><p className="font-semibold">Cần chuẩn hóa</p><p className="mt-1 text-amber-800">Chiến dịch cũ vẫn có thể mở và lưu. Dữ liệu chưa ánh xạ được hiển thị chỉ đọc và không bị xóa.</p></div></div>
       ) : null}
 
-      {!canSave && <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-600">Chỉ xem · Tài khoản hiện tại không có quyền sửa thông tin tại đây.</p>}
-      <fieldset className="space-y-4" disabled={saving || !canSave}>
+      {!canSave && !canEnterDraft && <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-600">Chỉ xem · Tài khoản hiện tại không có quyền sửa thông tin tại đây.</p>}
+      <fieldset className="space-y-4" disabled={saving || !(canSave || canEnterDraft)}>
         <FormSection title="Thông tin chính" description="Chỉ Tên chiến dịch và Cấp chiến dịch là bắt buộc khi lưu bản nháp." icon="campaign">
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
             <FieldAccessBoundary keys={['name']} className="rounded-2xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm">
@@ -429,7 +434,8 @@ export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignR
             <span><span className="block font-semibold text-slate-900">Tự động tính thời gian QCTT</span><span className="mt-1 block leading-5">Bắt đầu QCTT 30 ngày trước ngày chương trình có hiệu lực và kết thúc QCTT vào đúng ngày chương trình hết hiệu lực.</span></span>
           </label>
           <div className="grid gap-5 lg:grid-cols-2">
-            <DateRange title="Thời gian hiệu lực" startField="effectiveStartDate" endField="effectiveEndDate" start={value.effectiveStartDate} end={value.effectiveEndDate} onStart={(next) => change((current) => ({ ...current, effectiveStartDate: next, ...(current.communicationDatesAuto ? { startDate: next ? shiftCampaignDate(next, -30) : '' } : {}) }))} onEnd={(next) => change((current) => ({ ...current, effectiveEndDate: next, ...(current.communicationDatesAuto ? { endDate: next } : {}) }))} />
+            <DateRange title="Thời gian hiệu lực chương trình/xuất vé" startField="effectiveStartDate" endField="effectiveEndDate" start={value.effectiveStartDate} end={value.effectiveEndDate} onStart={(next) => change((current) => ({ ...current, effectiveStartDate: next, ...(current.communicationDatesAuto ? { startDate: next ? shiftCampaignDate(next, -30) : '' } : {}) }))} onEnd={(next) => change((current) => ({ ...current, effectiveEndDate: next, ...(current.communicationDatesAuto ? { endDate: next } : {}) }))} />
+            <DateRange title="Thời gian hiệu lực khởi hành" startField="departureStartDate" endField="departureEndDate" start={value.departureStartDate} end={value.departureEndDate} onStart={(next) => changeValue('departureStartDate', next)} onEnd={(next) => changeValue('departureEndDate', next)} />
             <DateRange title="Thời gian QCTT" startField="startDate" endField="endDate" start={value.startDate} end={value.endDate} onStart={(next) => change((current) => ({ ...current, startDate: next, communicationDatesAuto: false }))} onEnd={(next) => change((current) => ({ ...current, endDate: next, communicationDatesAuto: false }))} />
           </div>
         </FormSection>
@@ -442,7 +448,7 @@ export const CampaignRecordForm = forwardRef<CampaignRecordFormHandle, CampaignR
             <FieldLabel text="Trụ cột nội dung" fieldKeys={["content_pillar_l1_code", "content_pillar_l1_label", "content_pillar_l2_code", "content_pillar_l2_label"]}><select className={inputClass} value={value.contentPillarL1Code} onChange={(event) => { const selected = parentPillars.find((pillar) => pillar.code === event.target.value); change((current) => ({ ...current, contentPillarL1Code: selected?.code ?? '', contentPillarL1Label: selected?.label ?? '', contentPillarL2Code: '', contentPillarL2Label: '' })); }}><option value="">Chưa chọn</option>{value.contentPillarL1Code && !parentPillars.some((pillar) => pillar.code === value.contentPillarL1Code) ? <option value={value.contentPillarL1Code}>{value.contentPillarL1Label || value.contentPillarL1Code} (legacy)</option> : null}{parentPillars.map((pillar) => <option key={pillar.code} value={pillar.code}>{pillar.label}</option>)}</select></FieldLabel>
             <FieldLabel text="Chủ đề nội dung" fieldKeys={["content_pillar_l2_code", "content_pillar_l2_label"]}><select className={inputClass} value={value.contentPillarL2Code} disabled={!value.contentPillarL1Code} onChange={(event) => { const selected = childPillars.find((pillar) => pillar.code === event.target.value); change((current) => ({ ...current, contentPillarL2Code: selected?.code ?? '', contentPillarL2Label: selected?.label ?? '' })); }}><option value="">Chưa chọn</option>{value.contentPillarL2Code && !childPillars.some((pillar) => pillar.code === value.contentPillarL2Code) ? <option value={value.contentPillarL2Code}>{value.contentPillarL2Label || value.contentPillarL2Code} (legacy)</option> : null}{childPillars.map((pillar) => <option key={pillar.code} value={pillar.code}>{pillar.label}</option>)}</select></FieldLabel>
           </div>
-          <FieldAccessBoundary keys={['descriptionRichText']} className="mt-6"><p className="text-sm font-semibold text-slate-800">Mô tả chiến dịch</p><CampaignRichTextEditor value={value.descriptionRichText} disabled={saving || !canSave || !canEdit(['descriptionRichText'])} onChange={(next) => changeValue('descriptionRichText', next)} onValidationError={setValidationError} /></FieldAccessBoundary>
+          <FieldAccessBoundary keys={['descriptionRichText']} className="mt-6"><p className="text-sm font-semibold text-slate-800">Mô tả chiến dịch</p><CampaignRichTextEditor value={value.descriptionRichText} disabled={saving || !(canSave || canEnterDraft) || !canEdit(['descriptionRichText'])} onChange={(next) => changeValue('descriptionRichText', next)} onValidationError={setValidationError} /></FieldAccessBoundary>
         </FormSection>
 
         <FormSection title="Phạm vi thị trường" description="Tùy chọn · Có thể chọn đồng thời Việt Nam và Quốc tế. Các lựa chọn được lưu có cấu trúc." icon="filter">

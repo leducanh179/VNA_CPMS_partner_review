@@ -74,7 +74,7 @@ export function CampaignDetailPage({ id, notify }: { id: string; notify(message:
     if (campaign?.isDeleted && (activeTab === 'approval' || activeTab === 'planning')) { setActiveTab('information'); return; }
     if (!canSeeApproval && activeTab === 'approval') { setActiveTab('information'); return; }
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
-    if (!campaign?.isDeleted && activeTab === 'information' && shouldOpenCampaignApprovalTab(requestedTab, canSeeApproval, Boolean(pageWorkflow))) setActiveTab('approval');
+    if (!campaign?.isDeleted && activeTab === 'information' && shouldOpenCampaignApprovalTab(requestedTab, canSeeApproval)) setActiveTab('approval');
   }, [activeTab, campaign?.isDeleted, canSeeApproval, pageWorkflow]);
 
   if (!campaign && (!snapshot.initialized || snapshot.loading)) return <Card><LoadingBlock label="Đang mở hồ sơ chiến dịch…" /></Card>;
@@ -138,7 +138,7 @@ export function CampaignDetailPage({ id, notify }: { id: string; notify(message:
     if (!confirmUnsavedNavigation()) return;
     setActiveTab(next);
     const url = new URL(window.location.href);
-    if (next === 'approval') url.searchParams.delete('tab');
+    if (next === 'information') url.searchParams.delete('tab');
     else url.searchParams.set('tab', next);
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -159,26 +159,14 @@ export function CampaignDetailPage({ id, notify }: { id: string; notify(message:
 
   return (
     <div className="mx-auto max-w-[1500px]">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+      <CampaignDetailDock>
+      <div className="flex flex-wrap items-start justify-between gap-4 px-1 pt-1">
         <div><div className="flex flex-wrap items-center gap-3"><p className="font-mono text-sm font-bold text-vna-blue">{campaign.code}</p>{me.directSuperadmin && !campaign.isDeleted && !isCampaignCodeCompliant(campaign.code) ? <button type="button" disabled={codeRepairing} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-vna-blue hover:bg-cyan-50 disabled:opacity-50" onClick={() => setCodeRepairConfirming(true)}>{codeRepairing ? 'Đang đổi mã…' : 'Chuẩn hóa mã'}</button> : null}<StatusBadge>{campaign.isDeleted ? 'Trong Thùng rác' : campaign.qcttStatus ?? CAMPAIGN_STATE_LABELS[campaign.lifecycleState]}</StatusBadge>{campaign.pendingChangeLabel && <span className="text-xs text-amber-700">{campaign.pendingChangeLabel}</span>}</div><h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{campaign.name}</h1>{codeRepairError ? <p role="alert" className="mt-2 text-sm text-rose-700">{codeRepairError}</p> : null}</div>
         <div className="flex flex-wrap items-center gap-2">
           <AppLink className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-vna-blue/40 hover:text-vna-blue" to="/campaigns"><CpmsIcon name="back" />Trở lại danh sách</AppLink>
           {capabilities['booking.read']&&<AppLink className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-vna-blue" to={`/bookings?campaignId=${campaign.id}`}><CpmsIcon name="booking"/>Đặt chỗ của chiến dịch</AppLink>}
         </div>
       </div>
-      {codeRepairConfirming && me.directSuperadmin && !campaign.isDeleted && !isCampaignCodeCompliant(campaign.code) ? (
-        <Card className="mb-4 border-amber-200 bg-amber-50 p-4">
-          <div role="group" aria-label="Xác nhận chuẩn hóa mã Chiến dịch">
-            <p className="text-sm font-semibold text-slate-900">Đổi mã {campaign.code} sang mã mới đúng quy tắc?</p>
-            <p className="mt-1 text-sm text-slate-700">Mã cũ sẽ không còn dùng để tra cứu. Mã chiến dịch mới được ghi vào lịch sử kiểm toán.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="secondary" disabled={codeRepairing} onClick={() => setCodeRepairConfirming(false)}>Hủy</Button>
-              <Button disabled={codeRepairing} onClick={() => void regenerateCode()}>{codeRepairing ? 'Đang đổi mã…' : 'Xác nhận đổi mã'}</Button>
-            </div>
-          </div>
-        </Card>
-      ) : null}
-      <CampaignDetailDock>
         <CampaignGlobalActions campaign={campaign} proposalActive={Boolean(proposalAccess)} proposalRequiresApproval={proposalRequiresApproval} proposalDirty={proposalDirty} proposalSaving={saving}
           onStartEdit={(access, requiresApproval) => { if (activeTab !== 'information') selectTab('information'); setProposalAccess(access); setProposalRequiresApproval(requiresApproval); setProposalKey(crypto.randomUUID()); setError(null); }}
           onSubmitProposal={async () => { await formRef.current?.submit(); }}
@@ -197,6 +185,18 @@ export function CampaignDetailPage({ id, notify }: { id: string; notify(message:
         {canSeeApproval && activeTab !== 'approval' ? <div className="flex justify-end bg-white px-4 py-2 sm:px-5"><button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-vna-blue px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-vna-blue/90" onClick={() => selectTab('approval')}><CpmsIcon name="back" />Trở lại Phê duyệt</button></div> : null}
       </Card>
       </CampaignDetailDock>
+      {codeRepairConfirming && me.directSuperadmin && !campaign.isDeleted && !isCampaignCodeCompliant(campaign.code) ? (
+        <Card className="mb-4 border-amber-200 bg-amber-50 p-4">
+          <div role="group" aria-label="Xác nhận chuẩn hóa mã Chiến dịch">
+            <p className="text-sm font-semibold text-slate-900">Đổi mã {campaign.code} sang mã mới đúng quy tắc?</p>
+            <p className="mt-1 text-sm text-slate-700">Mã cũ sẽ không còn dùng để tra cứu. Mã chiến dịch mới được ghi vào lịch sử kiểm toán.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant="secondary" disabled={codeRepairing} onClick={() => setCodeRepairConfirming(false)}>Hủy</Button>
+              <Button disabled={codeRepairing} onClick={() => void regenerateCode()}>{codeRepairing ? 'Đang đổi mã…' : 'Xác nhận đổi mã'}</Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <section id={`campaign-tabpanel-${activeTab}`} role="tabpanel" aria-labelledby={`campaign-tab-${activeTab}`}>
         {activeTab === 'approval' && !campaign.isDeleted ? <CampaignApprovalWorkspace campaign={campaign} onNavigateInformation={() => selectTab('information')} onSaved={refreshCampaign} /> : null}
@@ -205,6 +205,7 @@ export function CampaignDetailPage({ id, notify }: { id: string; notify(message:
           <CampaignGovernanceSummary campaign={campaign} />
           {proposalAccess && <Card className="mb-4 border-cyan-200 bg-cyan-50 p-5"><div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">{proposalRequiresApproval ? 'Đề nghị sửa đổi Chiến dịch' : 'Sửa trực tiếp Chiến dịch'}</h2><p className="mt-1 text-xs text-slate-600">{proposalRequiresApproval ? 'Nội dung sẽ được gửi Lãnh đạo Phòng phê duyệt.' : 'Thay đổi sẽ được lưu ngay theo chính sách hiện hành.'}</p></div><Button variant="ghost" disabled={saving} onClick={() => { if (!hasUnsavedChanges() || window.confirm('Bỏ nội dung sửa đổi chưa lưu?')) { setProposalAccess(null); setProposalRequiresApproval(true); setProposalReason(''); } }}>Hủy sửa đổi</Button></div><label className="mt-3 block text-sm">Lý do sửa đổi <span className="text-slate-500">({proposalRequiresApproval ? 'bắt buộc' : 'không bắt buộc'})</span><textarea className="mt-1 w-full rounded-xl border border-slate-200 p-3" aria-label="Lý do sửa đổi" rows={2} maxLength={1000} value={proposalReason} onChange={(event) => setProposalReason(event.target.value)} /></label></Card>}
           <CampaignRecordForm ref={formRef} key={`${campaign.id}:${proposalAccess ? 'proposal' : 'effective'}`} campaign={formCampaign!} saving={saving} error={error} onPersist={persist} showDriveWorkspace={false} showSaveBar={!proposalAccess} onDirtyChange={setProposalDirty} {...(proposalAccess ? { successMessage: proposalRequiresApproval ? 'Đã gửi đề nghị sửa đổi.' : 'Đã lưu thay đổi.' } : {})} notify={notify} />
+          {campaign.access?.permissions['campaign.drive.read'] && <CampaignDriveWorkspaceCard campaign={campaign} notify={notify} />}
         </> : null}
 
         {activeTab === 'documents' ? <>{capabilities['material.read'] ? <CampaignMaterialsTable campaign={campaign} notify={notify} /> : null}{campaign.access?.permissions['campaign.drive.read'] ? <CampaignDriveWorkspaceCard campaign={campaign} notify={notify} /> : !capabilities['material.read'] ? <UnavailableTab icon="folder" title="Tư liệu" message="Tài khoản hiện tại không có quyền xem tư liệu của Chiến dịch này." /> : null}</> : null}

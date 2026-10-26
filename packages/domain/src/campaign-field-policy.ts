@@ -6,6 +6,7 @@ export const CAMPAIGN_ACCESS_FIELD_ALIASES: Readonly<Record<string, string>> = {
   name: 'campaign_name', code: 'campaign_code', levelCode: 'campaign_level_code',
   startDate: 'campaign_comm_start_date', endDate: 'campaign_comm_end_date',
   effectiveStartDate: 'campaign_effect_start_date', effectiveEndDate: 'campaign_effect_end_date',
+  departureStartDate: 'campaign_departure_start_date', departureEndDate: 'campaign_departure_end_date',
   primaryObjectiveCode: 'campaign_objective', primary_objective_code: 'campaign_objective',
   primaryObjectiveOther: 'primary_objective_other',
   kpiText: 'kpi_primary', kpi_text: 'kpi_primary',

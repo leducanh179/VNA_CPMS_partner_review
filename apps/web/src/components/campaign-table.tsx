@@ -1,7 +1,8 @@
 import type { CampaignSummary } from '@cpms/domain';
-import { LoadingBlock, StatusBadge } from '@cpms/ui';
+import { LoadingBlock } from '@cpms/ui';
 import { CAMPAIGN_STATE_LABELS, formatDate } from '../lib/campaign-presentation';
 import { AppLink, campaignDetailPath } from '../lib/router';
+import { CampaignStatusChip } from './campaign-status-highlight';
 
 export function CampaignTable({
   campaigns,
@@ -29,19 +30,19 @@ export function CampaignTable({
         <tbody className="divide-y divide-slate-100">
           {campaigns.map((campaign) => (
             <tr key={campaign.id} className="group transition hover:bg-cyan-50/45">
-              <td className="whitespace-nowrap px-6 py-4 font-mono text-xs font-semibold text-vna-blue">
+              <td className="whitespace-nowrap px-6 py-4 font-mono text-xs font-medium text-slate-600">
                 <AppLink className="rounded underline-offset-4 group-hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vna-gold" to={campaignDetailPath(campaign.id)}>
                   {campaign.code}
                 </AppLink>
               </td>
               <td className="min-w-64 px-6 py-4">
-                <AppLink className="font-semibold text-slate-900 underline-offset-4 group-hover:text-vna-blue group-hover:underline" to={campaignDetailPath(campaign.id)}>
+                <AppLink className="font-semibold text-vna-blue underline-offset-4 group-hover:underline" to={campaignDetailPath(campaign.id)}>
                   {campaign.name}
                 </AppLink>
               </td>
               <td className="whitespace-nowrap px-6 py-4 text-slate-600">{campaign.requestingUnit}</td>
               <td className="whitespace-nowrap px-6 py-4 text-slate-600">{formatDate(campaign.startDate)} – {formatDate(campaign.endDate)}</td>
-              <td className="whitespace-nowrap px-6 py-4"><StatusBadge>{CAMPAIGN_STATE_LABELS[campaign.lifecycleState]}</StatusBadge></td>
+              <td className="whitespace-nowrap px-6 py-4"><CampaignStatusChip campaign={campaign} status={campaign.isDeleted ? 'Trong Thùng rác' : campaign.qcttStatus ?? CAMPAIGN_STATE_LABELS[campaign.lifecycleState]} /></td>
             </tr>
           ))}
           {!loading && campaigns.length === 0 ? (

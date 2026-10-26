@@ -1,7 +1,7 @@
 import { Button, Card, Field } from '@cpms/ui';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type PropsWithChildren } from 'react';
-import { requestJson } from './lib/api';
-import { invalidateIdentityRequests } from './lib/identity-network';
+import { ApiHttpError, requestJson } from './lib/api';
+import { currentIdentityEpoch, identityTransitionInProgress, invalidateIdentityRequests } from './lib/identity-network';
 import { confirmUnsavedNavigation } from './lib/unsaved-changes';
 
 export interface PublicAccount {
@@ -27,15 +27,39 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [generation, setGeneration] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sessionWarning, setSessionWarning] = useState('');
+  const lastKnownIdentity = useRef(me);
+  lastKnownIdentity.current = me;
+  const refreshFlight = useRef<{ epoch: number; promise: Promise<void> } | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
   const clear = useCallback((changing: boolean) => { invalidateIdentityRequests(changing); setMe(undefined); setGeneration((value) => value + 1); }, []);
-  const refresh = useCallback(async () => {
-    try { setMe(await requestJson<LocalIdentity>('/auth/me')); }
-    catch (caught) { if (!(caught instanceof DOMException && caught.name === 'AbortError')) setMe(null); }
-  }, []);
+  const refresh = useCallback((): Promise<void> => {
+    if (identityTransitionInProgress()) return Promise.resolve();
+    const epoch = currentIdentityEpoch();
+    const hadIdentity = Boolean(lastKnownIdentity.current);
+    if (refreshFlight.current?.epoch === epoch) return refreshFlight.current.promise;
+    const promise = (async () => {
+      try {
+        const identity = await requestJson<LocalIdentity>('/auth/me', { signal: AbortSignal.timeout(15000) });
+        if (epoch !== currentIdentityEpoch()) return;
+        setMe(identity); setSessionWarning('');
+      } catch (caught) {
+        if (epoch !== currentIdentityEpoch()) return;
+        if (caught instanceof ApiHttpError && caught.status === 401) {
+          clear(false); setMe(null); setSessionWarning('');
+          if (hadIdentity) setError('Phiên đã hết hạn hoặc bị thu hồi. Hãy đăng nhập lại.');
+        } else if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
+          // A failed probe is not evidence of logout. Keep the authenticated editor mounted.
+          setSessionWarning('Chưa kiểm tra được phiên do kết nối gián đoạn. Nội dung đang nhập được giữ; thao tác lưu vẫn cần máy chủ xác nhận.');
+        }
+      } finally { if (refreshFlight.current?.epoch === epoch) refreshFlight.current = null; }
+    })();
+    refreshFlight.current = { epoch, promise };
+    return promise;
+  }, [clear]);
   useEffect(() => {
     void refresh();
-    const expired = () => { clear(false); setMe(null); setError('Phiên đã hết hạn hoặc bị thu hồi. Hãy đăng nhập lại.'); };
+    const expired = () => { void refresh(); };
     const focus = () => { void refresh(); };
     channel.current = new BroadcastChannel('cpms-session');
     channel.current.onmessage = (event: MessageEvent) => {
@@ -45,28 +69,38 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
     window.addEventListener('cpms:session-expired', expired);
     window.addEventListener('focus', focus);
-    return () => { channel.current?.close(); window.removeEventListener('cpms:session-expired', expired); window.removeEventListener('focus', focus); };
+    window.addEventListener('online', focus);
+    return () => { channel.current?.close(); window.removeEventListener('cpms:session-expired', expired); window.removeEventListener('focus', focus); window.removeEventListener('online', focus); };
   }, [clear, refresh]);
   useEffect(() => {
     if (!me) return;
-    const timeout = window.setTimeout(() => { clear(false); setMe(null); }, Math.max(1, new Date(me.expiresAt).getTime() - Date.now()));
+    const timeout = window.setTimeout(() => { clear(false); setMe(null); setError('Phiên đã hết hạn. Hãy đăng nhập lại.'); }, Math.max(1, new Date(me.expiresAt).getTime() - Date.now()));
     return () => window.clearTimeout(timeout);
   }, [me, clear]);
 
   const command = async (path: string, body: object = {}) => {
-    setBusy(true); setError(''); clear(true); channel.current?.postMessage('changing');
-    try { await requestJson(path, { method: 'POST', body: JSON.stringify(body) }); }
+    setBusy(true); setError(''); setSessionWarning(''); clear(true); channel.current?.postMessage('changing');
+    let signedIn: LocalIdentity | undefined;
+    try {
+      const result = await requestJson<LocalIdentity>(path, { method: 'POST', body: JSON.stringify(body) });
+      if (path === '/auth/login') signedIn = result;
+    }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Không thể thay đổi phiên.'); }
-    finally { invalidateIdentityRequests(false); channel.current?.postMessage('changed'); await refresh(); setBusy(false); }
+    finally {
+      invalidateIdentityRequests(false); channel.current?.postMessage('changed');
+      if (signedIn) { setMe(signedIn); setSessionWarning(''); } else await refresh();
+      setBusy(false);
+    }
   };
   const logout = async () => { if (confirmUnsavedNavigation()) await command('/auth/logout'); };
   const switchDemo = async (target: string | null) => { if (confirmUnsavedNavigation()) await command(target ? '/auth/demo/start' : '/auth/demo/end', target ? { targetActorId: target } : {}); };
   const switchAssist = async (target: string | null, reason?: string) => { if (confirmUnsavedNavigation()) await command(target ? '/auth/assist/start' : '/auth/assist/end', target ? { targetActorId: target, reason } : {}); };
 
+  if (me === undefined && sessionWarning) return <main className="grid min-h-screen place-items-center bg-slate-50 p-8"><Card className="max-w-lg p-8"><p role="alert">Chưa kết nối được CPMS để kiểm tra phiên. Vui lòng thử lại.</p><Button className="mt-4" onClick={() => { void refresh(); }}>Thử kết nối lại</Button></Card></main>;
   if (!me || me.mustChangePassword) return <AuthenticationForm loading={me === undefined} busy={busy} error={error} changePassword={Boolean(me?.mustChangePassword)}
     onSubmit={(body) => command(me?.mustChangePassword ? '/auth/change-password' : '/auth/login', body)} />;
   return <AuthContext.Provider value={{ me, logout, switchDemo, switchAssist, refresh }}>
-    <div key={`${me.account.id}:${me.mode}:${me.account.recordVersion}:${generation}`}>{children}</div>
+    <div key={`${me.account.id}:${me.mode}:${me.account.recordVersion}:${generation}`}>{sessionWarning && <div data-inline-save-surface role="alert" className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900"><span>{sessionWarning}</span><Button size="sm" variant="secondary" onClick={() => { void refresh(); }}>Thử kết nối lại</Button></div>}{me.account.accountKind === 'PARTNER_DEMO' && <p role="status" className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900">Tài khoản demo IT · Được xem và thử nhập bản nháp riêng. Không được tạo, sửa, xóa hoặc gửi duyệt dữ liệu nghiệp vụ.</p>}{children}</div>
   </AuthContext.Provider>;
 }
 

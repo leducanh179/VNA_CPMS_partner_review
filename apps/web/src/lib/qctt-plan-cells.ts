@@ -1,4 +1,4 @@
-import type { CampaignRichTextDocument, QcttPlanFields, QcttPlanView } from '@cpms/domain';
+import { emptyQcttPlanFields, type CampaignRichTextDocument, type QcttPlanFields, type QcttPlanView } from '@cpms/domain';
 
 const paragraph = (text: string): CampaignRichTextDocument => ({ schemaVersion: 1, type: 'doc', content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : [] }] });
 
@@ -18,7 +18,7 @@ export function copyQcttPlanRowFields(row: Record<string, unknown>): QcttPlanFie
 
 /** Grid patches contain editable business values only, including fields hidden from view. */
 export function qcttPlanRowClipboardFields(row: Record<string, unknown>): Record<string, string> {
-  const fields = copyQcttPlanRowFields(row);
+  const fields = copyQcttPlanRowFields({ ...emptyQcttPlanFields(), ...row });
   return {
     professionLayer: fields.professionLayer ?? '', channelCode: fields.channelCode ?? '',
     activityLabel: fields.activityCode ?? '', content: fields.content ? JSON.stringify(fields.content) : '',

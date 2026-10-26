@@ -40,6 +40,7 @@ export abstract class IdentityRepository {
   abstract createDivisionLeader(sessionId: string, profile: DivisionLeaderProfile, passwordHash: string, mustChangePassword: boolean, reason: string): Promise<LocalAccount>;
   abstract createCommunicationSpecialist(sessionId: string, employeeCode: string, email: string, passwordHash: string, reason: string): Promise<LocalAccount>;
   abstract createPilotAdmin(sessionId: string, email: string, displayName: string, passwordHash: string, reason: string): Promise<LocalAccount>;
+  abstract createPartnerDemos(sessionId: string, accounts: { email: string; passwordHash: string }[], reason: string): Promise<LocalAccount[]>;
   abstract updateGmail(sessionId: string, actorId: string, expectedVersion: number, gmailEmail: string | null, reason: string): Promise<void>;
   abstract listAccounts(sessionId: string): Promise<LocalAccount[]>;
   abstract configureLocalDemoCredentials(sessionId: string, credentials: { actorId: string; expectedVersion: number; passwordHash: string }[], reason: string): Promise<{ configured: number }>;

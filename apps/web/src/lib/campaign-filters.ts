@@ -118,6 +118,8 @@ export function campaignColumnValues(campaign: CampaignSummary, fieldKey: string
   if (fieldKey === 'campaign_comm_end_date') return [isoDate(campaign.endDate)];
   if (fieldKey === 'campaign_effect_start_date') return [isoDate(campaign.effectiveStartDate)];
   if (fieldKey === 'campaign_effect_end_date') return [isoDate(campaign.effectiveEndDate)];
+  if (fieldKey === 'campaign_departure_start_date') return [isoDate(campaign.departureStartDate)];
+  if (fieldKey === 'campaign_departure_end_date') return [isoDate(campaign.departureEndDate)];
   if (fieldKey === 'requesting_unit') {
     return unique(campaign.requestingUnits.length
       ? campaign.requestingUnits.map((unit) => unit.displayName)
@@ -149,6 +151,8 @@ export function campaignGridDisplayValue(campaign: CampaignSummary, fieldKey: st
   if (fieldKey === 'campaign_comm_end_date') return isoDate(campaign.endDate);
   if (fieldKey === 'campaign_effect_start_date') return isoDate(campaign.effectiveStartDate);
   if (fieldKey === 'campaign_effect_end_date') return isoDate(campaign.effectiveEndDate);
+  if (fieldKey === 'campaign_departure_start_date') return isoDate(campaign.departureStartDate);
+  if (fieldKey === 'campaign_departure_end_date') return isoDate(campaign.departureEndDate);
   if (fieldKey === 'requesting_person') return campaignColumnValues(campaign, fieldKey).join('; ');
   if (fieldKey === 'department_approver_summary' || fieldKey === 'division_approver_summary') {
     return campaignColumnValues(campaign, fieldKey).join('; ');
@@ -193,7 +197,11 @@ function matchesDate(values: readonly string[], filter: CampaignDateColumnFilter
 }
 
 export function campaignMatchesColumnFilter(campaign: CampaignSummary, fieldKey: string, filter: CampaignColumnFilter) {
-  const values = campaignColumnValues(campaign, fieldKey);
+  return columnValuesMatchFilter(campaignColumnValues(campaign, fieldKey), filter);
+}
+
+export function columnValuesMatchFilter(rawValues: readonly string[], filter: CampaignColumnFilter) {
+  const values = unique(rawValues);
   if (filter.type === 'text') return matchesText(values, filter);
   if (filter.type === 'date') return matchesDate(values, filter);
   if (!values.length) return filter.includeBlank;
@@ -267,12 +275,9 @@ export function campaignMatchesGlobalSearch(campaign: CampaignSummary, query: st
   return !normalized || campaignGlobalSearchText(campaign).includes(normalized);
 }
 
-export function defaultColumnFilter(definition: CampaignFieldDefinition): CampaignColumnFilter {
+export function defaultColumnFilter(definition: Pick<CampaignFieldDefinition, 'key' | 'kind'>): CampaignColumnFilter {
   if (definition.kind === 'date' || definition.kind === 'dateTime') {
     return { type: 'date', mode: 'months', months: [], includeBlank: false, from: '', to: '' };
-  }
-  if (definition.key === 'campaign_code' || definition.key === 'campaign_name') {
-    return { type: 'text', operator: 'contains', query: '' };
   }
   return { type: 'set', values: [], includeBlank: false };
 }

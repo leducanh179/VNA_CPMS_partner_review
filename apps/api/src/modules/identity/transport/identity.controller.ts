@@ -43,7 +43,7 @@ export class IdentityController {
   async login(@Body(validated(LocalLoginDto)) body: LocalLoginDto, @Req() request: RequestWithActor, @Res({ passthrough: true }) response: Response) {
     if (this.config.get('AUTH_MODE', { infer: true }) !== 'LOCAL_SESSION') throw new ForbiddenException('Đăng nhập local chưa bật.');
     const result = await this.service.login(body.email, body.password, request.ip ?? request.socket.remoteAddress ?? 'unknown');
-    this.cookies(response, result.token, result.csrfToken, result.session.expiresAt); return result.me;
+    this.cookies(response, result.token, result.csrfToken, result.session.expiresAt); return { ...result.me, demoImpersonationEnabled: this.config.get('LOCAL_DEMO_IMPERSONATION', { infer: true }) === 'true' };
   }
   @Get('me') me(@Req() request: RequestWithActor) {
     return { ...this.service.me(this.current(request)), demoImpersonationEnabled: this.config.get('LOCAL_DEMO_IMPERSONATION', { infer: true }) === 'true' };
@@ -63,6 +63,9 @@ export class IdentityController {
   }
   @Post('accounts/pilot-admins') createPilotAdmin(@Body() body: unknown, @Req() request: RequestWithActor) {
     return this.service.createPilotAdmin(this.current(request), body);
+  }
+  @Post('accounts/partner-demos') createPartnerDemos(@Body() body: unknown, @Req() request: RequestWithActor) {
+    return this.service.createPartnerDemos(this.current(request), body);
   }
   @Post('accounts/:id/gmail') async updateGmail(@Param('id', ParseUUIDPipe) id: string, @Body() body: unknown, @Req() request: RequestWithActor) {
     await this.service.updateGmail(this.current(request), id, body); return { updated: true };

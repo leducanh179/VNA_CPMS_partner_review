@@ -10,9 +10,10 @@ export const qcttPlanFields = z.object({
   startDate: day.nullable(), endDate: day.nullable(), departmentId: z.string().uuid().nullable(),
   requirements: z.string().max(10000), progress: z.enum(['PLANNED','IN_PROGRESS','COMPLETED','STOPPED']),
 }).strict().refine(v => !v.startDate || !v.endDate || v.startDate <= v.endDate, 'Ngày kết thúc phải từ ngày bắt đầu trở đi.');
-const item = z.object({ id: z.string().uuid().optional(), expectedVersion: z.number().int().positive().optional(), fields: qcttPlanFields }).strict();
+const item = z.object({ id: z.string().uuid().optional(), expectedVersion: z.number().int().positive().optional(), position: z.number().int().min(1).max(10000).optional(), fields: qcttPlanFields }).strict();
 export const qcttPlanCommand = z.discriminatedUnion('action', [
   z.object({ action: z.literal('SAVE'), idempotencyKey: z.string().uuid(), items: z.array(item).min(1).max(50) }).strict(),
   z.object({ action: z.literal('COLUMNS'), idempotencyKey: z.string().uuid(), expectedVersion: z.number().int().nonnegative(), columns: z.array(z.object({ key: z.string().min(1).max(100), label: z.string().trim().min(1).max(100) }).strict()).min(1).max(30) }).strict(),
+  z.object({ action: z.literal('REORDER'), idempotencyKey: z.string().uuid(), expectedVersion: z.number().int().positive(), itemIds: z.array(z.string().uuid()).min(1).max(10000) }).strict(),
   z.object({ action: z.enum(['DELETE','RESTORE']), idempotencyKey: z.string().uuid(), items: z.array(z.object({ id: z.string().uuid(), expectedVersion: z.number().int().positive() }).strict()).min(1).max(50) }).strict(),
 ]);

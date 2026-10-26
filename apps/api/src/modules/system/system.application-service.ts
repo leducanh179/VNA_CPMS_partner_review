@@ -19,6 +19,6 @@ export class SystemApplicationService {
     return { service: 'cpms-api', version: '0.1.0', status: 'ok',
       database: { status: 'connected', engine: 'postgresql', runtime: this.config.get('DB_RUNTIME', { infer: true }) },
       auth: { mode: this.config.get('AUTH_MODE', { infer: true }), actor: { id: actor.id, key: actor.key, displayName: actor.displayName, roles: actor.roles } },
-      ai: { mode: this.config.get('AI_MODE', { infer: true }), provider: 'none' }, checkedAt: new Date().toISOString() };
+      ai: { mode: this.config.get('AI_MODE', { infer: true }), provider: this.config.get('AI_MODE', { infer: true }) === 'OPENAI' ? 'openai' : 'none' }, checkedAt: new Date().toISOString() };
   }
 }

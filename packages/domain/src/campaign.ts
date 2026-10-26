@@ -126,6 +126,8 @@ export interface CampaignSummary {
   endDate: string | null;
   effectiveStartDate: string | null;
   effectiveEndDate: string | null;
+  departureStartDate?: string | null;
+  departureEndDate?: string | null;
   levelCode: CampaignLevelCode | null;
   levelLabel: string | null;
   levelRuleDescription: string | null;
@@ -159,6 +161,8 @@ export interface CampaignV2Fields {
   endDate?: string | null;
   effectiveStartDate?: string | null;
   effectiveEndDate?: string | null;
+  departureStartDate?: string | null;
+  departureEndDate?: string | null;
   levelCode?: CampaignLevelCode | null;
   requestingEmployeeCode?: string | null;
   manualRequesterEmail?: string | null;

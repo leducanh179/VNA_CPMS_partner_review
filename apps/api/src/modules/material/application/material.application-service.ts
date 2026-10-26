@@ -19,6 +19,8 @@ import {
   type MaterialCampaignReference,
   type MaterialPortalBootstrap,
   type MaterialSummary,
+  type MaterialSharing,
+  type MaterialCapabilities,
   type Permission,
 } from '@cpms/domain';
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
@@ -49,6 +51,11 @@ export class MaterialApplicationService {
   constructor(@Inject(MATERIAL_REPOSITORY) private readonly repository: MaterialRepository) {}
 
   protected async selectableCampaigns(): Promise<SelectableCampaign[]> { return []; }
+  protected async authorizeRecord(_record: MaterialSummary, _action: keyof MaterialCapabilities): Promise<void> {}
+  protected async initialSharing(item: MaterialBatchSaveItem, actor: ActorContext): Promise<MaterialSharing> {
+    if (item.sharing) throw new BadRequestException('Chia sẻ phải qua Application Service có phân quyền.');
+    return { mode: 'SHARED', ownerActorId: actor.id, campaignIds: [], grants: [] };
+  }
 
   list(includeDeleted = false): Promise<MaterialSummary[]> {
     return this.repository.list(includeDeleted);
@@ -88,6 +95,8 @@ export class MaterialApplicationService {
     const materialIds = items.flatMap((item) => item.materialId ? [item.materialId] : []);
     const current = await this.repository.findByMaterialIds(materialIds);
     const currentById = new Map(current.map((record) => [record.materialId, record]));
+    const receipts = await this.repository.findCreationReceipts?.(items.filter(item => !item.materialId).map(item => item.clientKey), actor) ?? [];
+    const receiptByKey = new Map(receipts.map(receipt => [receipt.clientKey, receipt]));
     const campaigns = items.some((item) => item.fields.campaign_refs && item.fields.campaign_refs !== currentById.get(item.materialId || '')?.fields.campaign_refs)
       ? await this.selectableCampaigns() : [];
     const prepared: Array<{ clientKey: string; record: PersistMaterialRecord }> = [];
@@ -101,6 +110,22 @@ export class MaterialApplicationService {
         continue;
       }
       try {
+        const receipt = !item.materialId && receiptByKey.get(item.clientKey);
+        if (receipt) {
+          if (receipt.unavailable) throw new BadRequestException('Tư liệu của lần lưu trước đã bị xóa. Không tự tạo lại khi thử lưu.');
+          await this.authorizeRecord(receipt.material, 'view');
+          resultByKey.set(item.clientKey, { clientKey: item.clientKey, materialId: receipt.material.materialId, ok: true, material: receipt.material, replayed: true });
+          continue;
+        }
+        if (item.materialId && !existing) throw new NotFoundException('Không tìm thấy tư liệu trong phạm vi được phép.');
+        if (existing) await this.authorizeRecord(existing, 'edit');
+        if (existing && item.sharing) throw new BadRequestException('Thay đổi chia sẻ bằng chức năng Chia sẻ, không qua lưu nội dung.');
+        for (const key of Object.keys(item.fields)) {
+          if (/sharing|capabilit|ownerActor|grants/i.test(key) ||
+              ['created_by', 'created_at', 'visibility', 'record_version'].includes(key) && item.fields[key as MaterialFieldKey] !== existing?.fields[key as MaterialFieldKey]) {
+            throw new BadRequestException('Không được sửa tác giả hoặc quyền truy cập qua nội dung tư liệu.');
+          }
+        }
         if (existing?.isDeleted) throw new BadRequestException('Hãy phục hồi tư liệu trước khi chỉnh sửa.');
         const normalized = this.normalizeFields(item.fields);
         this.assertSingleLink(existing, item.fields, normalized);
@@ -123,6 +148,8 @@ export class MaterialApplicationService {
         prepared.push({
           clientKey: item.clientKey,
           record: {
+            ...(!existing ? { creationClientKey: item.clientKey } : {}),
+            ...(!existing ? { sharing: await this.initialSharing(item, actor) } : {}),
             materialId,
             fields,
             recordVersion,
@@ -141,9 +168,9 @@ export class MaterialApplicationService {
         const saved = await this.repository.saveBatch(prepared.map((entry) => entry.record), actor, 'material.batch_saved');
         const savedById = new Map(saved.map((record) => [record.materialId, record]));
         for (const entry of prepared) {
-          const material = savedById.get(entry.record.materialId);
+          const material = saved.find(record => record.creationClientKey === entry.clientKey) ?? savedById.get(entry.record.materialId);
           if (!material) throw new Error(`Không nhận được record ${entry.record.materialId} sau khi lưu.`);
-          resultByKey.set(entry.clientKey, { clientKey: entry.clientKey, materialId: material.materialId, ok: true, material });
+          resultByKey.set(entry.clientKey, { clientKey: entry.clientKey, materialId: material.materialId, ok: true, material, ...(material.replayed ? { replayed: true } : {}) });
         }
       } catch (error) {
         for (const entry of prepared) {
@@ -174,14 +201,15 @@ export class MaterialApplicationService {
     for (const item of items) {
       const record = currentById.get(item.materialId);
       if (!record) {
-        resultByKey.set(item.materialId, { clientKey: item.materialId, materialId: item.materialId, ok: false, code: 'VALIDATION', message: 'Không tìm thấy tư liệu.' });
-        continue;
-      }
-      if (record.recordVersion !== item.expectedVersion) {
-        resultByKey.set(item.materialId, { clientKey: item.materialId, materialId: item.materialId, ok: false, code: 'CONFLICT', message: 'Version đã thay đổi; hãy tải lại trước khi xác nhận lô.' });
+        resultByKey.set(item.materialId, { clientKey: item.materialId, materialId: item.materialId, ok: false, code: 'VALIDATION', message: 'Không tìm thấy tư liệu trong phạm vi được phép.' });
         continue;
       }
       try {
+        await this.authorizeRecord(record, action === 'RESTORE' ? 'restore' : action === 'SOFT_DELETE' ? 'delete' : 'publish');
+        if (record.recordVersion !== item.expectedVersion) {
+          resultByKey.set(item.materialId, { clientKey: item.materialId, materialId: item.materialId, ok: false, code: 'CONFLICT', message: 'Version đã thay đổi; hãy tải lại trước khi xác nhận lô.' });
+          continue;
+        }
         const fields = this.applyBulkAction(record, action, actor, reason);
         const recordVersion = record.recordVersion + 1;
         fields.record_version = String(recordVersion);
@@ -223,7 +251,8 @@ export class MaterialApplicationService {
       throw new ForbiddenException('Chỉ quản trị viên hệ thống được xóa vĩnh viễn tư liệu.');
     }
     const [current] = await this.repository.findByMaterialIds([materialId]);
-    if (!current) throw new NotFoundException('Không tìm thấy tư liệu.');
+    if (!current) throw new NotFoundException('Không tìm thấy tư liệu trong phạm vi được phép.');
+    await this.authorizeRecord(current, 'purge');
     await this.repository.purge(materialId, expectedVersion, actor);
   }
 

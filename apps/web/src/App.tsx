@@ -5,15 +5,17 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react
 import { CampaignProvider } from './campaign-context';
 import { AppShell } from './components/app-shell';
 import { matchRoute, usePathname } from './lib/router';
-import { AdminSystemPage } from './pages/admin-system-page';
-import { CampaignCockpitPage } from './pages/campaign-cockpit-page';
-import { CampaignDetailPage } from './pages/campaign-detail-page';
-import { CampaignEditPage } from './pages/campaign-edit-page';
-import { CampaignNewPage } from './pages/campaign-new-page';
-import { DashboardPage } from './pages/dashboard-page';
+const AdminSystemPage = lazy(async () => ({ default: (await import('./pages/admin-system-page')).AdminSystemPage }));
+const CampaignCockpitPage = lazy(async () => ({ default: (await import('./pages/campaign-cockpit-page')).CampaignCockpitPage }));
+const CampaignDetailPage = lazy(async () => ({ default: (await import('./pages/campaign-detail-page')).CampaignDetailPage }));
+const CampaignEditPage = lazy(async () => ({ default: (await import('./pages/campaign-edit-page')).CampaignEditPage }));
+const CampaignNewPage = lazy(async () => ({ default: (await import('./pages/campaign-new-page')).CampaignNewPage }));
+const DashboardPage = lazy(async () => ({ default: (await import('./pages/dashboard-page')).DashboardPage }));
 import { NotFoundPage } from './pages/not-found-page';
-import { MaterialPortalPage } from './pages/material-portal-page';
-import { MaterialEditPage, MaterialNewPage } from './pages/material-new-page';
+const MaterialPortalPage = lazy(async () => ({ default: (await import('./pages/material-portal-page')).MaterialPortalPage }));
+const MaterialEditPage = lazy(async () => ({ default: (await import('./pages/material-new-page')).MaterialEditPage }));
+const MaterialNewPage = lazy(async () => ({ default: (await import('./pages/material-new-page')).MaterialNewPage }));
+const PublicMaterialsPage = lazy(async () => ({ default: (await import('./pages/public-materials-page')).PublicMaterialsPage }));
 const MyWorkPage = lazy(async () => ({ default: (await import('./pages/my-work-page')).MyWorkPage }));
 const DirectoryPage = lazy(async () => ({ default: (await import('./pages/directory-page')).DirectoryPage }));
 const QcttCatalogPage = lazy(async () => ({ default: (await import('./pages/qctt-catalog-page')).QcttCatalogPage }));
@@ -40,6 +42,10 @@ function RoutedApplication() {
 
   let page;
   switch (route.name) {
+    case 'ai-home':
+      // The shell owns the persistent assistant, including its homepage view.
+      page = null;
+      break;
     case 'qctt-plans':
       page = <QcttPlansPage />;
       break;
@@ -119,6 +125,9 @@ function RoutedApplication() {
 }
 
 export default function App() {
+  const pathname = usePathname();
+  const publicMatch = pathname.match(/^\/public\/materials(?:\/([A-Za-z0-9_-]{1,120}))?$/);
+  if (publicMatch) return <Suspense fallback={<LoadingBlock label="Đang mở màn hình…" />}><PublicMaterialsPage {...(publicMatch[1] ? { id: publicMatch[1] } : {})}/></Suspense>;
   return (
     <AuthProvider><AccessCapabilitiesProvider><CampaignProvider>
       <RoutedApplication />

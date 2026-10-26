@@ -15,7 +15,7 @@ function setup() {
     save: vi.fn(async (_id: string, value: Record<string, unknown>) => ({ id, title: String(value.name ?? ''), levelCode: null, formData: value, recordVersion: 1, updatedAt: new Date() })),
     remove: vi.fn(async () => false),
   };
-  const access = { run: vi.fn(async (_actor: typeof actor, fn: () => Promise<unknown>) => fn()), require: vi.fn() };
+  const access = { run: vi.fn(async (_actor: typeof actor, fn: () => Promise<unknown>) => fn()), requireFormDraft: vi.fn() };
   return { service: new CampaignFormDraftApplicationService(repository as unknown as CampaignFormDraftRepository, access as unknown as AccessApplicationService), repository, access };
 }
 
@@ -26,7 +26,7 @@ describe('private Campaign form drafts', () => {
     expect(repository.save).toHaveBeenCalledWith(id, { name: 'Chiến dịch nhập dở', levelCode: null }, 0, actor);
     await service.list(actor);
     expect(repository.list).toHaveBeenCalledWith(actor.id);
-    expect(access.require).toHaveBeenCalledWith('campaign.create');
+    expect(access.requireFormDraft).toHaveBeenCalledWith('campaign');
   });
 
   it('does not disclose another actor’s draft and rejects oversized input', async () => {

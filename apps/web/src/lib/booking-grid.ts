@@ -15,7 +15,16 @@ export function bookingClipboardValue(value:string,type?:string,choices?:GridCho
   return value;
 }
 export function bookingClipboardRows(text:string):string[][] {
-  const rows=text.replace(/\r/g,'').replace(/\n$/,'').split('\n').map(line=>line.split('\t'));
+  // Excel quotes cells containing tabs/newlines. Preserve the rectangle, including empty cells.
+  const input=text.replace(/\r\n/g,'\n'),rows:string[][]=[];let row:string[]=[],cell='',quoted=false;
+  for(let i=0;i<input.length;i++){
+    const char=input[i]!;
+    if(char==='"'&&(quoted||!cell)){if(quoted&&input[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}
+    else if(!quoted&&(char==='\t'||char==='\n')){row.push(cell);cell='';if(char==='\n'){rows.push(row);row=[];}}
+    else cell+=char;
+  }
+  if(quoted)throw Error('Ô clipboard có dấu ngoặc kép chưa đóng.');
+  if(cell||row.length||!input.endsWith('\n')){row.push(cell);rows.push(row);}
   if(rows.length>50)throw Error('Mỗi lần dán tối đa 50 dòng.');
   if(rows.some(r=>r.length>100))throw Error('Mỗi lần dán tối đa 100 cột.');
   return rows;

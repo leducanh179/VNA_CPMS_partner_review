@@ -12,11 +12,19 @@ import { MaterialFormDraftController } from './transport/material-form-draft.con
 import { MaterialFormDraftApplicationService } from './application/material-form-draft.application-service';
 import { MaterialFormDraftRepository } from './application/material-form-draft.repository';
 import { PrismaMaterialFormDraftRepository } from './infrastructure/prisma-material-form-draft.repository';
+import { MaterialSharingRepository } from './application/material-sharing.repository';
+import { PrismaMaterialSharingRepository } from './infrastructure/prisma-material-sharing.repository';
+import { MaterialSharingApplicationService } from './application/material-sharing.application-service';
+import { PublicMaterialApplicationService } from './application/public-material.application-service';
+import { PublicMaterialController } from './transport/public-material.controller';
 
 @Module({
   imports: [CampaignCoreModule],
-  controllers: [MaterialController, MaterialFormDraftController],
+  controllers: [MaterialController, MaterialFormDraftController, PublicMaterialController],
+  exports: [MaterialApplicationService, MaterialSharingApplicationService],
   providers: [
+    MaterialSharingApplicationService, PublicMaterialApplicationService,
+    { provide: MaterialSharingRepository, useClass: PrismaMaterialSharingRepository },
     ScopedMaterialApplicationService,
     MaterialCollaborationApplicationService,
     MaterialFormDraftApplicationService,

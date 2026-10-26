@@ -47,6 +47,11 @@ export class ScopedGoogleIntegrationApplicationService extends GoogleIntegration
   }
   override async driveStatus() { return super.driveStatus(); }
   @AccessBoundary(0)
+  override async readAiLibrary(actor: ActorContext, spreadsheetId: string) {
+    this.requireDriveAdministrator();
+    return this.providerAccess.execute('campaign.sheets.read', undefined, () => super.readAiLibrary(actor, spreadsheetId));
+  }
+  @AccessBoundary(0)
   override async disconnectDriveConnection(actor: ActorContext) {
     this.requireDriveAdministrator();
     return this.providerAccess.execute('system.manage', undefined, () => super.disconnectDriveConnection(actor));
@@ -102,7 +107,7 @@ export class ScopedGoogleIntegrationApplicationService extends GoogleIntegration
   }
   override async withDriveAccessToken<T>(actor: ActorContext, operation: (accessToken: string) => Promise<T>): Promise<T> {
     this.providerAccess.assert(['campaign.create', 'campaign.delete', 'campaign.restore', 'campaign.approve', 'campaign.drive.read', 'campaign.drive.ensure', 'campaign.drive.upload',
-      'campaign.drive.rename', 'campaign.drive.trash', 'campaign.drive.restore', 'campaign.purge']);
+      'campaign.drive.rename', 'campaign.drive.trash', 'campaign.drive.restore', 'campaign.purge', 'campaign.sheets.read']);
     return super.withDriveAccessToken(actor, operation);
   }
 

@@ -42,6 +42,7 @@ export interface CampaignDriveWorkspaceView {
   accessMode: CampaignDriveAccessMode;
   sharingMode: CampaignDriveSharingMode;
   campaignFolderName: string | null;
+  campaignFolderId: string | null;
   expectedFolderName: string;
   campaignFolderLink: string | null;
   nameMismatch: boolean;
@@ -78,7 +79,60 @@ export interface CampaignDriveFilePage {
 
 export interface CampaignDriveUploadResult {
   file: CampaignDriveFileItem;
-  uploadMode: 'MULTIPART' | 'RESUMABLE';
+  uploadMode: 'MULTIPART' | 'RESUMABLE' | 'RECOVERED';
+}
+
+export interface CampaignDriveEntryItem {
+  id: string;
+  name: string;
+  folderId: string;
+  isFolder: boolean;
+  isShortcut: boolean;
+  shortcutTargetMimeType: string | null;
+  status: CampaignDriveFileStatus;
+  mimeType: string;
+  size: number | null;
+  modifiedTime: string | null;
+  lastModifiedBy: string | null;
+  trashedAt: string | null;
+  trashedBy: string | null;
+  webViewLink: string | null;
+  webContentLink: string | null;
+  canEdit: boolean;
+  canTrash: boolean;
+  canUntrash: boolean;
+  canDownload: boolean;
+}
+
+export type CampaignDriveShortcutTargetStatus = 'ACTIVE' | 'TRASHED' | 'UNAVAILABLE';
+
+export interface CampaignDriveFolderPage {
+  folder: { id: string; name: string };
+  breadcrumbs: Array<{ id: string; name: string }>;
+  items: CampaignDriveEntryItem[];
+  nextPageToken: string | null;
+}
+
+export interface CampaignDriveRelinkRequestView {
+  id: string;
+  campaignId: string;
+  sourceFolderId: string;
+  sourceFolderLink: string;
+  sourceFolderName: string;
+  targetFolderId: string;
+  targetFolderLink: string;
+  targetFolderName: string;
+  expectedFolderName: string;
+  reason: string;
+  status: 'PENDING' | 'APPLYING' | 'FAILED' | 'APPLIED' | 'REJECTED' | 'WITHDRAWN';
+  requestedByActorId: string;
+  requestedAt: string;
+  decidedByActorId: string | null;
+  decisionReason: string | null;
+  decidedAt: string | null;
+  appliedAt: string | null;
+  lastError: string | null;
+  recordVersion: number;
 }
 
 export interface CampaignDriveRenameFileCommand {

@@ -34,7 +34,8 @@ export class CampaignApplicationService {
     if (!command.levelCode) throw new BadRequestException('Cấp độ chiến dịch là bắt buộc.');
     await this.requireLevel(command.levelCode);
     this.assertDateRange(command.startDate, command.endDate, 'Thời gian QCTT');
-    this.assertDateRange(command.effectiveStartDate, command.effectiveEndDate, 'Thời gian hiệu lực');
+    this.assertDateRange(command.effectiveStartDate, command.effectiveEndDate, 'Thời gian hiệu lực chương trình/xuất vé');
+    this.assertDateRange(command.departureStartDate, command.departureEndDate, 'Thời gian hiệu lực khởi hành');
     await this.validateV2Fields(command);
 
     const code = command.code?.trim().toUpperCase()
@@ -57,6 +58,8 @@ export class CampaignApplicationService {
       campaign_comm_end_date: command.endDate ?? null,
       campaign_effect_start_date: command.effectiveStartDate ?? null,
       campaign_effect_end_date: command.effectiveEndDate ?? null,
+      campaign_departure_start_date: command.departureStartDate ?? null,
+      campaign_departure_end_date: command.departureEndDate ?? null,
       campaign_objective: command.primaryObjectiveCode ?? null,
       kpi_primary: this.cleanOptional(command.kpiText),
     });
@@ -65,6 +68,7 @@ export class CampaignApplicationService {
       code, name, requestingUnit, lifecycleState,
       startDate: this.toDate(command.startDate), endDate: this.toDate(command.endDate),
       effectiveStartDate: this.toDate(command.effectiveStartDate), effectiveEndDate: this.toDate(command.effectiveEndDate),
+      departureStartDate: this.toDate(command.departureStartDate), departureEndDate: this.toDate(command.departureEndDate),
       levelCode: command.levelCode,
       requestingEmployeeCode: this.cleanOptional(command.requestingEmployeeCode),
       manualRequesterEmail: this.cleanOptional(command.manualRequesterEmail),
@@ -116,7 +120,8 @@ export class CampaignApplicationService {
     if (!next.name.trim()) throw new BadRequestException('Tên chiến dịch là bắt buộc.');
     if (next.levelCode) await this.requireLevel(next.levelCode);
     this.assertDateRange(next.startDate, next.endDate, 'Thời gian QCTT');
-    this.assertDateRange(next.effectiveStartDate, next.effectiveEndDate, 'Thời gian hiệu lực');
+    this.assertDateRange(next.effectiveStartDate, next.effectiveEndDate, 'Thời gian hiệu lực chương trình/xuất vé');
+    this.assertDateRange(next.departureStartDate, next.departureEndDate, 'Thời gian hiệu lực khởi hành');
     await this.validateV2Fields(next);
 
     const markets = this.hasMarketChange(command) ? await this.resolveMarkets(command) : undefined;
@@ -138,6 +143,8 @@ export class CampaignApplicationService {
       campaign_comm_end_date: next.endDate,
       campaign_effect_start_date: next.effectiveStartDate ?? null,
       campaign_effect_end_date: next.effectiveEndDate ?? null,
+      campaign_departure_start_date: next.departureStartDate ?? null,
+      campaign_departure_end_date: next.departureEndDate ?? null,
       campaign_objective: next.primaryObjectiveCode ?? null,
       kpi_primary: this.cleanOptional(next.kpiText),
     });
@@ -156,6 +163,7 @@ export class CampaignApplicationService {
         name: next.name.trim(), requestingUnit, lifecycleState: next.lifecycleState,
         startDate: this.toDate(next.startDate), endDate: this.toDate(next.endDate),
         effectiveStartDate: this.toDate(next.effectiveStartDate), effectiveEndDate: this.toDate(next.effectiveEndDate),
+        departureStartDate: this.toDate(next.departureStartDate), departureEndDate: this.toDate(next.departureEndDate),
         levelCode: next.levelCode,
         requestingEmployeeCode: this.cleanOptional(next.requestingEmployeeCode),
         manualRequesterEmail: this.cleanOptional(next.manualRequesterEmail),
@@ -189,7 +197,8 @@ export class CampaignApplicationService {
     if (!next.name.trim()) throw new BadRequestException('Tên chiến dịch là bắt buộc.');
     if (next.levelCode) await this.requireLevel(next.levelCode);
     this.assertDateRange(next.startDate, next.endDate, 'Thời gian QCTT');
-    this.assertDateRange(next.effectiveStartDate, next.effectiveEndDate, 'Thời gian hiệu lực');
+    this.assertDateRange(next.effectiveStartDate, next.effectiveEndDate, 'Thời gian hiệu lực chương trình/xuất vé');
+    this.assertDateRange(next.departureStartDate, next.departureEndDate, 'Thời gian hiệu lực khởi hành');
     await this.validateV2Fields(next);
     if (this.hasMarketChange(command) || command.provinceCodes !== undefined) {
       const markets = this.hasMarketChange(command) ? await this.resolveMarkets(command) : current.markets;
@@ -266,6 +275,8 @@ export class CampaignApplicationService {
       endDate: command.endDate !== undefined ? command.endDate : current.endDate,
       effectiveStartDate: command.effectiveStartDate !== undefined ? command.effectiveStartDate : current.effectiveStartDate ?? null,
       effectiveEndDate: command.effectiveEndDate !== undefined ? command.effectiveEndDate : current.effectiveEndDate ?? null,
+      departureStartDate: command.departureStartDate !== undefined ? command.departureStartDate : current.departureStartDate ?? null,
+      departureEndDate: command.departureEndDate !== undefined ? command.departureEndDate : current.departureEndDate ?? null,
       levelCode: command.levelCode !== undefined ? command.levelCode : current.levelCode ?? null,
       requestingEmployeeCode: command.requestingEmployeeCode !== undefined ? command.requestingEmployeeCode : current.requestingEmployeeCode ?? null,
       manualRequesterEmail: command.manualRequesterEmail !== undefined ? command.manualRequesterEmail : current.manualRequesterEmail ?? null,
@@ -293,8 +304,10 @@ export class CampaignApplicationService {
       ['campaign_lifecycle_state', 'Trạng thái', current.lifecycleState, next.lifecycleState],
       ['campaign_comm_start_date', 'Thời gian bắt đầu QCTT', this.dateKey(current.startDate), this.dateKey(next.startDate)],
       ['campaign_comm_end_date', 'Thời gian kết thúc QCTT', this.dateKey(current.endDate), this.dateKey(next.endDate)],
-      ['campaign_effect_start_date', 'Bắt đầu hiệu lực', this.dateKey(current.effectiveStartDate), this.dateKey(next.effectiveStartDate)],
-      ['campaign_effect_end_date', 'Kết thúc hiệu lực', this.dateKey(current.effectiveEndDate), this.dateKey(next.effectiveEndDate)],
+      ['campaign_effect_start_date', 'Bắt đầu hiệu lực chương trình/xuất vé', this.dateKey(current.effectiveStartDate), this.dateKey(next.effectiveStartDate)],
+      ['campaign_effect_end_date', 'Kết thúc hiệu lực chương trình/xuất vé', this.dateKey(current.effectiveEndDate), this.dateKey(next.effectiveEndDate)],
+      ['campaign_departure_start_date', 'Bắt đầu hiệu lực khởi hành', this.dateKey(current.departureStartDate), this.dateKey(next.departureStartDate)],
+      ['campaign_departure_end_date', 'Kết thúc hiệu lực khởi hành', this.dateKey(current.departureEndDate), this.dateKey(next.departureEndDate)],
       ['campaign_level_code', 'Cấp chiến dịch', current.levelCode, next.levelCode],
       ['requesting_employee_code', 'Người yêu cầu', current.requestingEmployeeCode, next.requestingEmployeeCode],
       ['manual_requester_email', 'Email người yêu cầu', current.manualRequesterEmail, next.manualRequesterEmail],
@@ -345,6 +358,7 @@ export class CampaignApplicationService {
     const typedKeys = new Set([
       'campaign_code', 'campaign_name', 'requesting_unit', 'campaign_lifecycle_state', 'campaign_level_code',
       'campaign_comm_start_date', 'campaign_comm_end_date', 'campaign_effect_start_date', 'campaign_effect_end_date',
+      'campaign_departure_start_date', 'campaign_departure_end_date',
       'campaign_objective', 'kpi_primary',
     ]);
     return Object.fromEntries(Object.entries(values).filter(([key]) => !typedKeys.has(key)));

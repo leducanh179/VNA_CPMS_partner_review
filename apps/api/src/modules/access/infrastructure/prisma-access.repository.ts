@@ -62,7 +62,8 @@ export class PrismaAccessRepository extends AccessRepository {
         if (session.mode !== 'DIRECT' && !adminBindings.some((binding) => binding.actorId === session.original.id)) throw new UnauthorizedException('Quyền hỗ trợ đã bị thu hồi.');
         identity = { effectiveActorId: session.effective.id, originalActorId: session.original.id, sessionValid: true,
           effectiveActive: session.effective.isActive, originalActive: session.original.isActive,
-          profileComplete: session.effective.accountKind === 'PILOT_ADMIN' || Boolean(session.effective.personnelEmployeeCode && session.effective.employment), mode: session.mode,
+          readOnlyDemo: session.effective.accountKind === 'PARTNER_DEMO',
+          profileComplete: ['PILOT_ADMIN', 'PARTNER_DEMO'].includes(session.effective.accountKind) || Boolean(session.effective.personnelEmployeeCode && session.effective.employment), mode: session.mode,
           effectiveSuperadmin: adminBindings.some((binding) => binding.actorId === session.effective.id),
           orgIds: [session.effective.employment?.departmentId, session.effective.employment?.divisionId].filter((id): id is string => Boolean(id)) };
       } else {
@@ -91,10 +92,11 @@ export class PrismaAccessRepository extends AccessRepository {
     const now = Date.now(); const tx = this.prisma.database;
     const account = await tx.actor.findUnique({ where: { id: actorId }, select: { id: true, accountKind: true, isActive: true, personnelEmployeeCode: true,
       employment: { select: { departmentId: true, divisionId: true } }, scopedBindings: { where: { roleCode: 'ADMIN', scopeType: 'SYSTEM', OR: [{ expiresAt: null }, { expiresAt: { gt: new Date(now) } }] }, select: { id: true } } } });
-    if (!account || !['PERSONNEL', 'PILOT_ADMIN'].includes(account.accountKind)) return null;
+    if (!account || !['PERSONNEL', 'PILOT_ADMIN', 'PARTNER_DEMO'].includes(account.accountKind)) return null;
     // Descriptive policy facts only. This is never installed as a request/session or used to execute a command.
     return { identity: { effectiveActorId: account.id, originalActorId: account.id, sessionValid: true, effectiveActive: account.isActive, originalActive: account.isActive,
-      profileComplete: account.accountKind === 'PILOT_ADMIN' || Boolean(account.personnelEmployeeCode && account.employment), mode: 'DIRECT', effectiveSuperadmin: account.scopedBindings.length > 0,
+      readOnlyDemo: account.accountKind === 'PARTNER_DEMO',
+      profileComplete: ['PILOT_ADMIN', 'PARTNER_DEMO'].includes(account.accountKind) || Boolean(account.personnelEmployeeCode && account.employment), mode: 'DIRECT', effectiveSuperadmin: account.scopedBindings.length > 0,
       orgIds: [account.employment?.departmentId, account.employment?.divisionId].filter((id): id is string => Boolean(id)) }, rules: await this.rules(tx, actorId, now) };
   }
 

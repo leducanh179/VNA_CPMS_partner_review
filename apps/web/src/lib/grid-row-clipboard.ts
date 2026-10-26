@@ -20,3 +20,13 @@ export function readGridRows(text: string, scope: string, encoded = ''): GridRow
   if (!candidate.rows.length || candidate.rows.length > 50 || candidate.rows.some(row => !row || typeof row !== 'object' || Array.isArray(row) || Object.values(row).some(cell => typeof cell !== 'string'))) return null;
   return structuredClone(candidate.rows);
 }
+
+
+/** Native context-menu clipboard reads only text; retain scope validation for the in-memory fallback too. */
+export function gridClipboardScope(text: string, encoded = ''): string | null {
+  let value: unknown = copiedRows;
+  if (encoded) { try { value = JSON.parse(encoded); } catch { return 'invalid'; } }
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as GridRowClipboard;
+  return typeof candidate.scope === 'string' && typeof candidate.text === 'string' && normalize(candidate.text) === normalize(text) ? candidate.scope : null;
+}

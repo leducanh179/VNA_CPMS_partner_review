@@ -2,14 +2,14 @@ import { isOwnedChannel, type ChannelActivity, type ChannelMapCatalog, type Cont
 import { Button, LoadingBlock } from '@cpms/ui';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth-context';
-import { useAccessCapabilities } from '../access-context';
+import { useFormDraftAccess } from '../access-context';
 import { ContractEditor } from '../components/contract-management';
 import { requestJson } from '../lib/api';
 import { contractEditPath, navigate } from '../lib/router';
 
 export function ContractFormPage({ id, owned = false }: { id?: string; owned?: boolean }) {
   const { me } = useAuth();
-  const capabilities = useAccessCapabilities();
+  const canOpenForm = useFormDraftAccess('contract');
   const query = new URLSearchParams(window.location.search);
   const draftId = query.get('draft') ?? undefined;
   const activityCode = query.get('activity');
@@ -42,7 +42,7 @@ export function ContractFormPage({ id, owned = false }: { id?: string; owned?: b
 
   const returnPath = id ? `/contracts/${encodeURIComponent(id)}?info=1` : owned ? '/contracts?type=owned' : '/contracts';
   if (loading) return <LoadingBlock label="Đang mở form hợp đồng…" />;
-  if (!id && !capabilities['contract.create']) return <div role="alert" className="mx-auto max-w-4xl rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">Bạn không có quyền tạo hồ sơ nguồn cung.<Button className="ml-3" variant="secondary" onClick={() => navigate(owned ? '/contracts?type=owned' : '/contracts')}>Về danh sách</Button></div>;
+  if (!id && !canOpenForm) return <div role="alert" className="mx-auto max-w-4xl rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">Bạn không có quyền tạo hồ sơ nguồn cung.<Button className="ml-3" variant="secondary" onClick={() => navigate(owned ? '/contracts?type=owned' : '/contracts')}>Về danh sách</Button></div>;
   if (error) return <div role="alert" className="mx-auto max-w-4xl rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800">{error}<Button className="ml-3" variant="secondary" onClick={() => navigate(returnPath)}>Quay lại</Button></div>;
   if (id && !workspace) return null;
   if (activityCode && owned && !activity) return null;
