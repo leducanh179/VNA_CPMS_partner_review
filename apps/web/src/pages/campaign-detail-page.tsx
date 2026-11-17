@@ -1,5 +1,7 @@
 import { Button, Card, CpmsIcon, LoadingBlock, StatusBadge, type CpmsIconName } from '@cpms/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { CampaignSharingDialog } from '../components/campaign-sharing-dialog';
 import { useCampaignWorkspace } from '../campaign-context';
 import { CampaignApprovalWorkspace } from '../components/campaign-approval-workspace';
 import { CampaignDriveWorkspaceCard } from '../components/campaign-drive-workspace-card';
@@ -42,6 +44,7 @@ export function CampaignDetailPage({ id, notify }: { id: string; notify(message:
   const capabilities = useAccessCapabilities();
   const { me } = useAuth();
   const [requested, setRequested] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [codeRepairing, setCodeRepairing] = useState(false);
   const [codeRepairConfirming, setCodeRepairConfirming] = useState(false);
@@ -159,10 +162,12 @@ export function CampaignDetailPage({ id, notify }: { id: string; notify(message:
 
   return (
     <div className="mx-auto max-w-[1500px]">
+      {sharingOpen && createPortal(<CampaignSharingDialog key={id} id={id} name={campaign.name} onClose={() => setSharingOpen(false)} />, document.body)}
       <CampaignDetailDock>
       <div className="flex flex-wrap items-start justify-between gap-4 px-1 pt-1">
         <div><div className="flex flex-wrap items-center gap-3"><p className="font-mono text-sm font-bold text-vna-blue">{campaign.code}</p>{me.directSuperadmin && !campaign.isDeleted && !isCampaignCodeCompliant(campaign.code) ? <button type="button" disabled={codeRepairing} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-vna-blue hover:bg-cyan-50 disabled:opacity-50" onClick={() => setCodeRepairConfirming(true)}>{codeRepairing ? 'Đang đổi mã…' : 'Chuẩn hóa mã'}</button> : null}<StatusBadge>{campaign.isDeleted ? 'Trong Thùng rác' : campaign.qcttStatus ?? CAMPAIGN_STATE_LABELS[campaign.lifecycleState]}</StatusBadge>{campaign.pendingChangeLabel && <span className="text-xs text-amber-700">{campaign.pendingChangeLabel}</span>}</div><h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{campaign.name}</h1>{codeRepairError ? <p role="alert" className="mt-2 text-sm text-rose-700">{codeRepairError}</p> : null}</div>
         <div className="flex flex-wrap items-center gap-2">
+          {!campaign.isDeleted && campaign.access?.canManageLinkSharing && <Button variant="secondary" onClick={() => setSharingOpen(true)}><CpmsIcon name="link" />Chia sẻ</Button>}
           <AppLink className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-vna-blue/40 hover:text-vna-blue" to="/campaigns"><CpmsIcon name="back" />Trở lại danh sách</AppLink>
           {capabilities['booking.read']&&<AppLink className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-vna-blue" to={`/bookings?campaignId=${campaign.id}`}><CpmsIcon name="booking"/>Đặt chỗ của chiến dịch</AppLink>}
         </div>

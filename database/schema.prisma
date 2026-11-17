@@ -214,6 +214,9 @@ model SupplyItemTerm {
 }
 
 model Actor {
+  missionProgress MissionProgress[]
+  collectibles PersonalCollectible[]
+  engagementSettings EngagementSettings[]
   initializedQcttPlans QcttPlan[] @relation("QcttPlanInitializer")
   createdQcttPlanItems QcttPlanItem[]
   qcttPlanItemRevisions QcttPlanItemRevision[]
@@ -293,6 +296,8 @@ model ActorRole {
 }
 
 model Campaign {
+  sharing CampaignSharing?
+  missionProgress MissionProgress[]
   qcttPlan QcttPlan?
   bookings BookingRecord[]
   id                      String                      @id @default(uuid()) @db.Uuid
@@ -357,6 +362,21 @@ model Campaign {
 }
 
 // Private, incomplete form state. It is not a Campaign and has no workflow or Drive side effects.
+model CampaignSharing {
+  campaignId String   @id @map("campaign_id") @db.Uuid
+  mode String
+  restrictedTabs String[] @map("restricted_tabs")
+  accountTabs String[] @map("account_tabs")
+  publicTabs String[] @map("public_tabs")
+  version Int
+  spreadsheetId String? @unique @map("spreadsheet_id")
+  spreadsheetExportedAt DateTime? @map("spreadsheet_exported_at") @db.Timestamptz(3)
+  spreadsheetSharingVersion Int? @map("spreadsheet_sharing_version")
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@map("campaign_sharing")
+}
+
 model CampaignFormDraft {
   id String @id @db.Uuid
   ownerActorId String @map("owner_actor_id") @db.Uuid
@@ -1962,4 +1982,39 @@ model SupplyLegalRevision {
   contract SupplyContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
   @@unique([contractId, version])
   @@map("supply_legal_revisions")
+}
+model EngagementSettings {
+  updatedBy Actor? @relation(fields: [updatedByActorId], references: [id], onDelete: Restrict)
+  key String @id @default("engagement")
+  enabled Boolean @default(false)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedByActorId String? @map("updated_by_actor_id") @db.Uuid
+  @@map("engagement_settings")
+}
+
+model MissionProgress {
+  owner Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  actorId String @map("actor_id") @db.Uuid
+  missionKey String @default("FIRST_CAMPAIGN") @map("mission_key")
+  runNumber Int @default(1) @map("run_number")
+  mode String
+  stage String @default("ACTIVE")
+  startedAt DateTime @default(now()) @map("started_at") @db.Timestamptz(3)
+  campaignId String? @map("campaign_id") @db.Uuid
+  campaignName String? @map("campaign_name")
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  rewardSeenAt DateTime? @map("reward_seen_at") @db.Timestamptz(3)
+  completedCount Int @default(0) @map("completed_count")
+  @@id([actorId, missionKey])
+  @@map("mission_progress")
+}
+
+model PersonalCollectible {
+  owner Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  actorId String @map("actor_id") @db.Uuid
+  itemKey String @map("item_key")
+  earnedAt DateTime @default(now()) @map("earned_at") @db.Timestamptz(3)
+  @@id([actorId, itemKey])
+  @@map("personal_collectibles")
 }

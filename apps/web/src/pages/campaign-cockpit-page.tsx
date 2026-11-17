@@ -222,6 +222,7 @@ export function CampaignCockpitPage({ notify }: { notify(message: string): void 
 
         {listMode === 'active' && <CampaignBatchWorkflowActions selectedIds={selectedIds} campaigns={campaigns} onSaved={() => { void store.load(true); }} />}
         <CampaignInlineTable
+          viewPreferenceAccountId={me.account.id}
           campaigns={pagedCampaigns}
           filterSourceCampaigns={quickFilteredCampaigns}
           columnFiltersEnabled={columnFiltersEnabled}

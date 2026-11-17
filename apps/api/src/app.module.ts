@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { EngagementModule } from './modules/engagement/engagement.module';
 import { AiModule } from './modules/ai/ai.module';
 import { GridDraftModule } from './modules/grid-draft/grid-draft.module';
 import { DirectoryModule } from './modules/directory/directory.module';
@@ -16,9 +17,11 @@ import { MaterialModule } from './modules/material/material.module';
 import { SystemModule } from './modules/system/system.module';
 import { AccessModule } from './modules/access/access.module';
 import { CampaignWorkflowModule } from './modules/campaign-workflow/campaign-workflow.module';
+import { PublicGuestModule } from './modules/public-guest/public-guest.module';
 
 @Module({
   imports: [
+    EngagementModule,
     AiModule,
     GridDraftModule,
     DirectoryModule,
@@ -35,6 +38,7 @@ import { CampaignWorkflowModule } from './modules/campaign-workflow/campaign-wor
     MaterialModule,
     ContractsModule,
     BookingModule,
+    PublicGuestModule,
   ],
 })
 export class AppModule {}

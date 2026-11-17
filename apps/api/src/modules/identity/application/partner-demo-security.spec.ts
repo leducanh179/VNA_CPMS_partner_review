@@ -10,6 +10,9 @@ describe('partner demo HTTP backstop', () => {
     }
     expect(partnerDemoRequestAllowed('PUT', '/api/grid-drafts/cpms.booking.partner-form.v1')).toBe(true);
     expect(partnerDemoRequestAllowed('POST', '/api/auth/logout')).toBe(true);
+    for (const command of ['start','demo-draft','demo-submit','reconcile','acknowledge']) expect(partnerDemoRequestAllowed('POST', `/api/engagement/${command}`)).toBe(true);
+    expect(partnerDemoRequestAllowed('PUT', '/api/engagement/settings')).toBe(false);
+    expect(partnerDemoRequestAllowed('POST', '/api/engagement/start/extra')).toBe(false);
     for (const route of ['/api/campaigns', '/api/contracts', '/api/bookings/batch-save', '/api/materials/batch-save', '/api/access/commands', '/api/auth/accounts/partner-demos', '/api/google/connect']) {
       for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) expect(partnerDemoRequestAllowed(method, route), `${method} ${route}`).toBe(false);
     }

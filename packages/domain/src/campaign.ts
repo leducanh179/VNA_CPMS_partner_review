@@ -1,6 +1,7 @@
 import type { AccessPermission } from './access-policy';
 
 export interface CampaignAccessCapabilities {
+  canManageLinkSharing?: boolean;
   permissions: Partial<Record<AccessPermission, boolean>>;
   editableFields: string[];
   canEditAnyField: boolean;

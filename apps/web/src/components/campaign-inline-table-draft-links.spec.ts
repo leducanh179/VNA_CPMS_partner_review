@@ -14,7 +14,7 @@ const draft = {
 function renderDraft(view: 'table' | 'timeline') {
   vi.stubGlobal('window', {
     localStorage: {
-      getItem: (key: string) => key === 'cpms.campaign.view-mode.v1' && view === 'timeline' ? 'timeline' : null,
+      getItem: (key: string) => key === 'cpms.campaign.view-mode.v2.default' ? view : null,
     },
   });
   return renderToStaticMarkup(createElement(CampaignInlineTable, {

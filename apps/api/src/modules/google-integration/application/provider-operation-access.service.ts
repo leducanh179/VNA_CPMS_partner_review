@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Environment } from '../../../config/environment';
 import { AccessApplicationService } from '../../access/application/access.application-service';
 
-type ProviderPermission = Extract<AccessPermission, `campaign.drive.${string}` | `campaign.sheets.${string}` | `google.${string}` | 'campaign.purge' | 'campaign.create' | 'campaign.delete' | 'campaign.restore' | 'campaign.approve' | 'system.manage'>;
+type ProviderPermission = Extract<AccessPermission, `campaign.drive.${string}` | `campaign.sheets.${string}` | `google.${string}` | 'campaign.purge' | 'campaign.export' | 'campaign.create' | 'campaign.delete' | 'campaign.restore' | 'campaign.approve' | 'system.manage'>;
 const readPermissions: readonly ProviderPermission[] = ['campaign.drive.read', 'campaign.sheets.read', 'campaign.purge'];
 interface ProviderContext { permission: ProviderPermission; resource?: AccessResource; actorId: string; sessionId: string | undefined }
 
@@ -21,7 +21,7 @@ export class ProviderOperationAccessService {
     // A direct administrator may establish or revoke OAuth before Drive file writes are enabled.
     // Guarded Drive file ports never accept system.manage as authorization for a file operation.
     if (permission === 'system.manage') return true;
-    return permission.startsWith('campaign.drive.') || ['campaign.create', 'campaign.delete', 'campaign.restore', 'campaign.approve', 'campaign.purge'].includes(permission)
+    return permission.startsWith('campaign.drive.') || ['campaign.create', 'campaign.delete', 'campaign.restore', 'campaign.approve', 'campaign.purge', 'campaign.export'].includes(permission)
       ? this.driveWritesEnabled() : this.writesEnabled();
   }
   execute<T>(permission: ProviderPermission, resource: AccessResource | undefined, operation: () => T): T {

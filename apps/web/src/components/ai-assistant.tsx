@@ -7,6 +7,7 @@ import type { LookupContext, LookupContextPreview, LookupRecordKind } from '@cpm
 import { aiRecordFromPath, publishAiSelection, useAiSelection } from '../lib/ai-selection';
 import { AiProposalCard } from './ai-proposal-card';
 import { AiLibraryResults } from './ai-library-results';
+import { AiMessage } from './ai-message';
 
 const money = (value: number) => new Intl.NumberFormat('vi-VN').format(value) + ' đ';
 const suggestions = [
@@ -289,7 +290,7 @@ function ChatWorkspace({ home, path, onDockWidthChange }: AssistantProps) {
           {turn.question.includes('\n\n[Ngữ cảnh ') && <details className="mt-2 text-xs"><summary className="cursor-pointer font-medium">Ngữ cảnh đã gửi</summary><p className="mt-2 break-words">{turn.question.slice(turn.question.indexOf('[Ngữ cảnh '))}</p></details>}
         </div>
         <div className="flex gap-3"><span className="mt-1 text-vna-blue"><CpmsIcon name="comments" size={20}/></span>
-          <div className="min-w-0 flex-1"><p className="whitespace-pre-wrap text-sm leading-7 text-slate-800">{turn.answer}</p>
+          <div className="min-w-0 flex-1"><AiMessage text={turn.answer}/>
             {turn.sources.length > 0 && <div className="mt-4 flex flex-wrap gap-2" aria-label="Nguồn CPMS">
               {turn.sources.map(source => <a key={`${source.kind}:${source.id}`} href={source.href} target="_blank" rel="noopener noreferrer" title="Mở nguồn trong tab mới"
                 className="inline-flex max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-vna-blue hover:border-cyan-400">

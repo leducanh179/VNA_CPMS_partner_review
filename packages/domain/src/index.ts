@@ -31,3 +31,5 @@ export * from './contract-items';
 export * from './channel-map';
 export * from './qctt-plan';
 export * from './qctt-catalog';
+export * from './engagement';
+export * from './campaign-sharing';

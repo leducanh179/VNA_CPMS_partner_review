@@ -1,14 +1,21 @@
 import { Card, Metric, SectionHeading, StatusBadge } from '@cpms/ui';
-import { CampaignTable } from '../components/campaign-table';
+import { useEffect, useState } from 'react';
+import { useAuth } from '../auth-context';
+import { CampaignTable, CampaignTimeline } from '../components/campaign-table';
 import { useCampaignWorkspace } from '../campaign-context';
 import { selectDashboardMetrics, selectRecentCampaigns } from '../lib/campaign-workspace';
+import { readCampaignViewMode, saveCampaignViewMode } from '../lib/campaign-view-mode';
 import { AppLink } from '../lib/router';
 
 export function DashboardPage() {
+  const { me } = useAuth();
+  const [viewMode, setViewMode] = useState(() => readCampaignViewMode(me.account.id));
   const { snapshot } = useCampaignWorkspace();
   const campaigns = snapshot.campaigns;
   const { drafts, running, ready } = selectDashboardMetrics(snapshot);
   const recentCampaigns = selectRecentCampaigns(snapshot);
+
+  useEffect(() => { saveCampaignViewMode(viewMode, me.account.id); }, [viewMode, me.account.id]);
 
   return (
     <>
@@ -59,9 +66,17 @@ export function DashboardPage() {
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <SectionHeading eyebrow="Cập nhật mới nhất">Chiến dịch gần đây</SectionHeading>
-          <AppLink className="text-sm font-semibold text-vna-blue hover:underline" to="/campaigns">Xem toàn bộ chiến dịch →</AppLink>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="Chế độ xem Chiến dịch">
+              <button type="button" aria-pressed={viewMode === 'table'} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${viewMode === 'table' ? 'bg-white text-vna-blue shadow-sm' : 'text-slate-500'}`} onClick={() => setViewMode('table')}>Bảng</button>
+              <button type="button" aria-pressed={viewMode === 'timeline'} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${viewMode === 'timeline' ? 'bg-white text-vna-blue shadow-sm' : 'text-slate-500'}`} onClick={() => setViewMode('timeline')}>Timeline</button>
+            </div>
+            <AppLink className="text-sm font-semibold text-vna-blue hover:underline" to="/campaigns">Xem toàn bộ chiến dịch →</AppLink>
+          </div>
         </div>
-        <CampaignTable campaigns={recentCampaigns} loading={snapshot.loading} emptyMessage="Chưa có chiến dịch. Hãy tạo chiến dịch đầu tiên." />
+        {viewMode === 'timeline'
+          ? <CampaignTimeline campaigns={recentCampaigns} loading={snapshot.loading} emptyMessage="Chưa có chiến dịch. Hãy tạo chiến dịch đầu tiên." />
+          : <CampaignTable campaigns={recentCampaigns} loading={snapshot.loading} emptyMessage="Chưa có chiến dịch. Hãy tạo chiến dịch đầu tiên." />}
       </Card>
     </>
   );

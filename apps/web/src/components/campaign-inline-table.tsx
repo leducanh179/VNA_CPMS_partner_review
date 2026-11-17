@@ -9,7 +9,6 @@ import {
   type CampaignBatchResult,
   type CampaignBatchSaveItem,
   type CampaignFieldDefinition,
-  type CampaignLifecycleState,
   type CampaignSummary,
 } from '@cpms/domain';
 import { Button, CpmsIcon, LoadingBlock } from '@cpms/ui';
@@ -41,6 +40,8 @@ import {
 } from '../lib/campaign-inline-edit';
 import { sortDirectionLabel, type CampaignSortDirection } from '../lib/campaign-grid';
 import { timelineColumnRevealScrollLeft, timelineDayHeader, timelineMonthGroups } from '../lib/campaign-timeline';
+import { campaignApprovalChipClass } from '../lib/campaign-approval-color';
+import { readCampaignViewMode, saveCampaignViewMode, type CampaignViewMode } from '../lib/campaign-view-mode';
 import { CAMPAIGN_STATE_LABELS } from '../lib/campaign-presentation';
 import {
   columnDragAutoScrollDelta,
@@ -53,7 +54,7 @@ import { useGridSave } from '../lib/use-grid-save';
 import { gridDestination } from '../lib/grid-navigation';
 import { useAccessCapabilities } from '../access-context';
 import { CampaignColumnFilterMenu, type CampaignColumnFilterAnchor } from './campaign-column-filter-menu';
-import { CampaignStatusChip } from './campaign-status-highlight';
+import { CampaignStatusChip, campaignStatusBarClass } from './campaign-status-highlight';
 import {
   campaignGridDisplayValue,
   isCampaignColumnFilterable,
@@ -63,6 +64,7 @@ import { CAMPAIGN_GRID_FIELD_BY_KEY, CAMPAIGN_GRID_FIELD_DEFINITIONS } from '../
 import type { CampaignFormDraftSummary } from '../lib/campaign-form-drafts';
 
 interface CampaignInlineTableProps {
+  viewPreferenceAccountId?: string;
   campaigns: readonly CampaignSummary[];
   filterSourceCampaigns: readonly CampaignSummary[];
   columnFiltersEnabled: boolean;
@@ -107,7 +109,6 @@ interface DisplayRow {
   draft: CampaignRowDraft;
 }
 
-type ViewMode = 'table' | 'timeline';
 type TimelineZoom = 'day' | 'week' | 'month' | 'quarter' | 'year';
 type ActiveCell = { rowKey: string; fieldKey: string };
 type FocusedGridItem = { kind: 'cell'; rowKey: string; fieldKey: string } | { kind: 'timeline-bar'; rowKey: string };
@@ -119,7 +120,6 @@ type ContextMenu =
 const MAX_BATCH_ROWS = 50;
 const COLUMN_STORAGE_KEY = 'cpms.campaign.visible-columns.v2';
 const PIN_STORAGE_KEY = 'cpms.campaign.pinned-columns.v1';
-const VIEW_STORAGE_KEY = 'cpms.campaign.view-mode.v1';
 const WIDTH_STORAGE_KEY = 'cpms.campaign.column-widths.v1';
 const inputClass = 'min-h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none transition focus:border-vna-blue focus:ring-2 focus:ring-cyan-100';
 
@@ -143,12 +143,6 @@ function storedWidths() {
   } catch {
     return {};
   }
-}
-
-function statusTone(state: CampaignLifecycleState): 'positive' | 'warning' | 'neutral' {
-  if (['READY_TO_LAUNCH', 'RUNNING', 'COMPLETED'].includes(state)) return 'positive';
-  if (['DRAFT', 'PAUSE_REQUESTED', 'CANCEL_REQUESTED'].includes(state)) return 'warning';
-  return 'neutral';
 }
 
 const campaignFormDraftPath = (draft: CampaignFormDraftSummary) => `/campaigns/new?draft=${encodeURIComponent(draft.id)}`;
@@ -218,6 +212,7 @@ function timelineLabel(value: Date, zoom: TimelineZoom) {
 }
 
 export function CampaignInlineTable({
+  viewPreferenceAccountId = 'default',
   campaigns,
   filterSourceCampaigns,
   columnFiltersEnabled,
@@ -329,9 +324,7 @@ export function CampaignInlineTable({
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [columnFilterMenu, setColumnFilterMenu] = useState<{ fieldKey: string; anchor: CampaignColumnFilterAnchor } | null>(null);
   const [columnQuery, setColumnQuery] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>(() => (
-    typeof window !== 'undefined' && window.localStorage.getItem(VIEW_STORAGE_KEY) === 'timeline' ? 'timeline' : 'table'
-  ));
+  const [viewMode, setViewMode] = useState<CampaignViewMode>(() => readCampaignViewMode(viewPreferenceAccountId));
   const [revealTimelineField, setRevealTimelineField] = useState<string | null>(null);
   const [zoom, setZoom] = useState<TimelineZoom>('month');
   const newRowCounter = useRef(0);
@@ -345,7 +338,7 @@ export function CampaignInlineTable({
   useEffect(() => { window.localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(visibleFields)); }, [visibleFields]);
   useEffect(() => { window.localStorage.setItem('cpms.campaign.qctt-status-column.v1', 'true'); }, []);
   useEffect(() => { window.localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(pinnedFields)); }, [pinnedFields]);
-  useEffect(() => { window.localStorage.setItem(VIEW_STORAGE_KEY, viewMode); }, [viewMode]);
+  useEffect(() => { saveCampaignViewMode(viewMode, viewPreferenceAccountId); }, [viewMode, viewPreferenceAccountId]);
   useEffect(() => { window.localStorage.setItem(WIDTH_STORAGE_KEY, JSON.stringify(columnWidths)); }, [columnWidths]);
   useEffect(() => {
     if (!columnFiltersEnabled) setColumnFilterMenu(null);
@@ -906,6 +899,7 @@ export function CampaignInlineTable({
       const label = row.campaign?.qcttStatus ?? CAMPAIGN_STATE_LABELS[state];
       return <div><CampaignStatusChip campaign={row.campaign} status={label} />{row.campaign?.pendingChangeLabel && <p className="mt-1 text-[10px] text-amber-700">{row.campaign.pendingChangeLabel}</p>}</div>;
     }
+    if (definition.key === 'campaign_approval_status') return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${campaignApprovalChipClass(value)}`}>{value || 'Chưa trình'}</span>;
     if (definition.kind === 'date') return displayDate(value, false);
     if (definition.kind === 'dateTime') return displayDate(value, true);
     if (definition.kind === 'url' && /^https?:\/\//i.test(value)) {
@@ -1499,7 +1493,7 @@ function TimelineSplitView({
                 {scale.ticks.map((tick) => { const header = zoom === 'day' ? timelineDayHeader(tick.date) : null; return <span key={tick.key} className={`absolute inset-y-0 border-l ${header?.isMonthStart ? 'border-l-2 border-slate-300' : 'border-slate-100'} ${header?.isWeekend ? 'bg-slate-100/70' : ''}`} style={{ left: tick.left, width: zoom === 'day' ? tick.width : undefined }} />; })}
                 {today >= 0 && today <= scale.width ? <span className="absolute inset-y-0 z-10 border-l-2 border-rose-400/70" style={{ left: today }} title="Hôm nay" /> : null}
                 {valid ? (
-                  <div role="button" tabIndex={0} aria-pressed={focusedGridItem?.kind === 'timeline-bar' && focusedGridItem.rowKey === row.key} aria-label={`Thanh timeline của Chiến dịch ${rowValue(row, 'campaign_name')}`} data-campaign-selected-bar={focusedGridItem?.kind === 'timeline-bar' && focusedGridItem.rowKey === row.key ? 'true' : undefined} onClick={() => onFocusGridItem({ kind: 'timeline-bar', rowKey: row.key })} onDoubleClick={() => { if (row.campaign) navigate(`${campaignDetailPath(row.campaign.id)}?tab=information#campaign-time`); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (row.campaign) navigate(`${campaignDetailPath(row.campaign.id)}?tab=information#campaign-time`); else onFocusGridItem({ kind: 'timeline-bar', rowKey: row.key }); } }} className={`absolute top-2.5 z-20 flex h-8 cursor-pointer items-center rounded-lg px-2 text-[10px] font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-vna-blue ${focusedGridItem?.kind === 'timeline-bar' && focusedGridItem.rowKey === row.key ? 'ring-2 ring-vna-blue-deep ring-offset-2 ring-offset-white shadow-md' : ''} ${statusTone(row.draft.lifecycleState) === 'positive' ? 'bg-emerald-500 text-white' : statusTone(row.draft.lifecycleState) === 'warning' ? 'bg-amber-300 text-amber-950' : 'bg-vna-blue text-white'}`} style={{ left: barLeft, width: barWidth }} title={`${rowValue(row, 'campaign_name')} · ${row.draft.startDate} → ${row.draft.endDate}${row.campaign ? ' · Nháy đúp để mở mục Thời gian' : ''}`}><span className="truncate">{rowValue(row, 'campaign_name')}</span></div>
+                  <div role="button" tabIndex={0} aria-pressed={focusedGridItem?.kind === 'timeline-bar' && focusedGridItem.rowKey === row.key} aria-label={`Thanh timeline của Chiến dịch ${rowValue(row, 'campaign_name')}`} data-campaign-selected-bar={focusedGridItem?.kind === 'timeline-bar' && focusedGridItem.rowKey === row.key ? 'true' : undefined} onClick={() => onFocusGridItem({ kind: 'timeline-bar', rowKey: row.key })} onDoubleClick={() => { if (row.campaign) navigate(`${campaignDetailPath(row.campaign.id)}?tab=information#campaign-time`); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (row.campaign) navigate(`${campaignDetailPath(row.campaign.id)}?tab=information#campaign-time`); else onFocusGridItem({ kind: 'timeline-bar', rowKey: row.key }); } }} className={`absolute top-2.5 z-20 flex h-8 cursor-pointer items-center rounded-lg px-2 text-[10px] font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-vna-blue ${focusedGridItem?.kind === 'timeline-bar' && focusedGridItem.rowKey === row.key ? 'ring-2 ring-vna-blue-deep ring-offset-2 ring-offset-white shadow-md' : ''} border ${campaignStatusBarClass(row.campaign, row.campaign?.qcttStatus ?? CAMPAIGN_STATE_LABELS[row.draft.lifecycleState])}`} style={{ left: barLeft, width: barWidth }} title={`${rowValue(row, 'campaign_name')} · ${row.draft.startDate} → ${row.draft.endDate} · ${row.campaign?.qcttStatus ?? CAMPAIGN_STATE_LABELS[row.draft.lifecycleState]}${row.campaign ? ' · Nháy đúp để mở mục Thời gian' : ''}`}><span className="truncate">{rowValue(row, 'campaign_name')}</span></div>
                 ) : <span className="absolute left-3 top-4 text-[10px] font-medium text-slate-400">Chưa xác định thời gian</span>}
               </div>
             );

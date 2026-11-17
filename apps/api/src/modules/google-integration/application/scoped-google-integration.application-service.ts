@@ -107,7 +107,7 @@ export class ScopedGoogleIntegrationApplicationService extends GoogleIntegration
   }
   override async withDriveAccessToken<T>(actor: ActorContext, operation: (accessToken: string) => Promise<T>): Promise<T> {
     this.providerAccess.assert(['campaign.create', 'campaign.delete', 'campaign.restore', 'campaign.approve', 'campaign.drive.read', 'campaign.drive.ensure', 'campaign.drive.upload',
-      'campaign.drive.rename', 'campaign.drive.trash', 'campaign.drive.restore', 'campaign.purge', 'campaign.sheets.read']);
+      'campaign.drive.rename', 'campaign.drive.trash', 'campaign.drive.restore', 'campaign.purge', 'campaign.sheets.read', 'campaign.export']);
     return super.withDriveAccessToken(actor, operation);
   }
 

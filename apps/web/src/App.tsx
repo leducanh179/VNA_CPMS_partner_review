@@ -129,7 +129,7 @@ export default function App() {
   const publicMatch = pathname.match(/^\/public\/materials(?:\/([A-Za-z0-9_-]{1,120}))?$/);
   if (publicMatch) return <Suspense fallback={<LoadingBlock label="Đang mở màn hình…" />}><PublicMaterialsPage {...(publicMatch[1] ? { id: publicMatch[1] } : {})}/></Suspense>;
   return (
-    <AuthProvider><AccessCapabilitiesProvider><CampaignProvider>
+    <AuthProvider pathname={pathname}><AccessCapabilitiesProvider><CampaignProvider>
       <RoutedApplication />
     </CampaignProvider></AccessCapabilitiesProvider></AuthProvider>
   );

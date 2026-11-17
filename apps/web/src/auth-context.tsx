@@ -1,6 +1,8 @@
 import { Button, Card, Field } from '@cpms/ui';
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type PropsWithChildren } from 'react';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type PropsWithChildren } from 'react';
 import { ApiHttpError, requestJson } from './lib/api';
+import { navigate } from './lib/router';
+import { sharedCampaignId } from './lib/campaign-sharing';
 import { currentIdentityEpoch, identityTransitionInProgress, invalidateIdentityRequests } from './lib/identity-network';
 import { confirmUnsavedNavigation } from './lib/unsaved-changes';
 
@@ -20,9 +22,20 @@ interface AuthContextValue {
   me: LocalIdentity; logout(): Promise<void>; switchDemo(target: string | null): Promise<void>; switchAssist(target: string | null, reason?: string): Promise<void>; refresh(): Promise<void>;
 }
 const AuthContext = createContext<AuthContextValue | null>(null);
+const GuestPreviewApp = lazy(async () => ({ default: (await import('./guest-preview-app')).GuestPreviewApp }));
+const SharedCampaignPage = lazy(async () => ({ default: (await import('./pages/shared-campaign-page')).SharedCampaignPage }));
 export function useAuth() { const value = useContext(AuthContext); if (!value) throw new Error('Authentication context is required.'); return value; }
 
-export function AuthProvider({ children }: PropsWithChildren) {
+function AuthenticatedRedirect() {
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get('returnTo') ?? '';
+    const pathname = next.split('?')[0] ?? '';
+    navigate(sharedCampaignId(pathname) ? next : '/', true, true);
+  }, []);
+  return null;
+}
+
+export function AuthProvider({ children, pathname }: PropsWithChildren<{ pathname: string }>) {
   const [me, setMe] = useState<LocalIdentity | null | undefined>(undefined);
   const [generation, setGeneration] = useState(0);
   const [error, setError] = useState('');
@@ -97,8 +110,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const switchAssist = async (target: string | null, reason?: string) => { if (confirmUnsavedNavigation()) await command(target ? '/auth/assist/start' : '/auth/assist/end', target ? { targetActorId: target, reason } : {}); };
 
   if (me === undefined && sessionWarning) return <main className="grid min-h-screen place-items-center bg-slate-50 p-8"><Card className="max-w-lg p-8"><p role="alert">Chưa kết nối được CPMS để kiểm tra phiên. Vui lòng thử lại.</p><Button className="mt-4" onClick={() => { void refresh(); }}>Thử kết nối lại</Button></Card></main>;
-  if (!me || me.mustChangePassword) return <AuthenticationForm loading={me === undefined} busy={busy} error={error} changePassword={Boolean(me?.mustChangePassword)}
+  if (me === undefined) return <main role="status" className="grid min-h-screen place-items-center bg-slate-50 p-8 text-sm text-slate-600">Đang mở CPMS…</main>;
+  const shareId = sharedCampaignId(pathname);
+  if (shareId && !me?.mustChangePassword) return <Suspense fallback={<main role="status" className="p-8">Đang mở chiến dịch…</main>}>
+    <SharedCampaignPage key={`${shareId}:${me?.account.id ?? 'guest'}:${me?.mode ?? ''}`} id={shareId} signedIn={Boolean(me)} />
+  </Suspense>;
+  if (me === null && pathname !== '/login') return <Suspense fallback={<main role="status" className="p-8">Đang mở bản xem thử CPMS…</main>}><GuestPreviewApp pathname={pathname}/></Suspense>;
+  if (!me || me.mustChangePassword) return <AuthenticationForm loading={false} busy={busy} error={error} changePassword={Boolean(me?.mustChangePassword)}
     onSubmit={(body) => command(me?.mustChangePassword ? '/auth/change-password' : '/auth/login', body)} />;
+  if (pathname === '/login') return <AuthenticatedRedirect/>;
   return <AuthContext.Provider value={{ me, logout, switchDemo, switchAssist, refresh }}>
     <div key={`${me.account.id}:${me.mode}:${me.account.recordVersion}:${generation}`}>{sessionWarning && <div data-inline-save-surface role="alert" className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900"><span>{sessionWarning}</span><Button size="sm" variant="secondary" onClick={() => { void refresh(); }}>Thử kết nối lại</Button></div>}{me.account.accountKind === 'PARTNER_DEMO' && <p role="status" className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900">Tài khoản demo IT · Được xem và thử nhập bản nháp riêng. Không được tạo, sửa, xóa hoặc gửi duyệt dữ liệu nghiệp vụ.</p>}{children}</div>
   </AuthContext.Provider>;
@@ -129,6 +149,7 @@ function AuthenticationForm({ loading, busy, error, changePassword, onSubmit }: 
         {(error || localError) && <p role="alert" className="text-sm text-rose-700">{localError || error}</p>}
         <Button type="submit" className="w-full" disabled={busy}>{changePassword ? 'Đổi mật khẩu' : 'Đăng nhập'}</Button>
       </form>}
+      {!changePassword && <a href="/" className="mt-5 block text-center text-sm font-semibold text-vna-blue hover:underline">Xem thử CPMS không cần đăng nhập</a>}
     </Card>
   </main>;
 }

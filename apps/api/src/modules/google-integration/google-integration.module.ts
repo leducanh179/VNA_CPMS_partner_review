@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { CLOUD_DRIVE_PORT, CLOUD_SPREADSHEET_PORT, USER_OAUTH_PORT } from '@cpms/integrations';
+import { CLOUD_DRIVE_PORT, CLOUD_MANAGED_SPREADSHEET_PORT, CLOUD_SPREADSHEET_PORT, USER_OAUTH_PORT } from '@cpms/integrations';
 import { CampaignCoreModule } from '../campaign/campaign-core.module';
 import { GoogleIntegrationApplicationService } from './application/google-integration.application-service';
 import { GOOGLE_INTEGRATION_REPOSITORY } from './application/google-integration.repository';
@@ -25,8 +25,18 @@ const GUARDED_GOOGLE_PORTS = Symbol('GUARDED_GOOGLE_PORTS');
     { provide: USER_OAUTH_PORT, useExisting: GUARDED_GOOGLE_PORTS },
     { provide: CLOUD_SPREADSHEET_PORT, useExisting: GUARDED_GOOGLE_PORTS },
     { provide: CLOUD_DRIVE_PORT, useExisting: GUARDED_GOOGLE_PORTS },
+    { provide: CLOUD_MANAGED_SPREADSHEET_PORT, useFactory: (adapter: GoogleApiAdapter, access: ProviderOperationAccessService) => ({
+      replaceManagedSpreadsheet: (input: Parameters<GoogleApiAdapter['replaceManagedSpreadsheet']>[0]) => {
+        access.assert(['campaign.export']);
+        return adapter.replaceManagedSpreadsheet(input);
+      },
+      grantSpreadsheetViewer: (input: Parameters<GoogleApiAdapter['grantSpreadsheetViewer']>[0]) => {
+        access.assert(['campaign.export']);
+        return adapter.grantSpreadsheetViewer(input);
+      },
+    }), inject: [GoogleApiAdapter, ProviderOperationAccessService] },
     { provide: GOOGLE_INTEGRATION_REPOSITORY, useExisting: PrismaGoogleIntegrationRepository },
   ],
-  exports: [GoogleIntegrationApplicationService, ScopedGoogleIntegrationApplicationService, ProviderOperationAccessService, CLOUD_DRIVE_PORT],
+  exports: [GoogleIntegrationApplicationService, ScopedGoogleIntegrationApplicationService, ProviderOperationAccessService, CLOUD_DRIVE_PORT, CLOUD_MANAGED_SPREADSHEET_PORT],
 })
 export class GoogleIntegrationModule {}

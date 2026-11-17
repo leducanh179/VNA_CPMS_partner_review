@@ -90,6 +90,19 @@ export interface CloudSpreadsheetPort {
 export const USER_OAUTH_PORT = Symbol('USER_OAUTH_PORT');
 export const CLOUD_SPREADSHEET_PORT = Symbol('CLOUD_SPREADSHEET_PORT');
 
+export interface CloudManagedSpreadsheetPort {
+  replaceManagedSpreadsheet(input: {
+    accessToken: string;
+    key: string;
+    spreadsheetId: string | null;
+    title: string;
+    sheets: TabularSheetData[];
+  }): Promise<string>;
+  grantSpreadsheetViewer(input: { accessToken: string; key: string; spreadsheetId: string; email: string }): Promise<void>;
+}
+
+export const CLOUD_MANAGED_SPREADSHEET_PORT = Symbol('CLOUD_MANAGED_SPREADSHEET_PORT');
+
 export interface CloudDriveCapabilities {
   canEdit: boolean;
   canTrash: boolean;

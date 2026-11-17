@@ -273,3 +273,40 @@ describe('GoogleApiAdapter Drive trash lifecycle', () => {
     expect('deleteItem' in adapter).toBe(false);
   });
 });
+
+
+describe('GoogleApiAdapter Campaign Sheet exports', () => {
+  it('recovers the existing file and replaces only the selected tabs in one batch', async () => {
+    const calls: { url: URL; init: RequestInit | undefined }[] = [];
+    const file = { id: 'existing-sheet', mimeType: 'application/vnd.google-apps.spreadsheet',
+      appProperties: { cpmsCampaignExport: 'fixture-key' }, capabilities: { canEdit: true } };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: new URL(url), init });
+      if (init?.method === 'POST') return Response.json({ replies: [] });
+      if (url.includes('sheets.googleapis.com')) return Response.json({ spreadsheetId: file.id, sheets: [
+        { properties: { sheetId: 7, title: 'Thông tin' } }, { properties: { sheetId: 8, title: 'Kế hoạch' } },
+      ] });
+      return Response.json(new URL(url).pathname.endsWith('/files') ? { files: [file] } : file);
+    }));
+    const result = await complete(new GoogleApiAdapter().replaceManagedSpreadsheet({
+      accessToken: 'test-token', key: 'fixture-key', spreadsheetId: null, title: 'Chiến dịch QA',
+      sheets: [{ name: 'Thông tin', rows: [['Trường', 'Nội dung'], ['Tên', '=1+1']] },
+        { name: 'Tư liệu', rows: [['Tiêu đề']] }],
+    }));
+    expect(result).toBe(file.id);
+    expect(calls[0]?.url.searchParams.get('q')).toContain("value='fixture-key'");
+    const writes = calls.filter(call => call.init?.method === 'POST');
+    expect(writes).toHaveLength(1);
+    const { requests } = JSON.parse(String(writes[0]?.init?.body));
+    expect(requests).toContainEqual({ deleteSheet: { sheetId: 8 } });
+    expect(requests).not.toContainEqual({ deleteSheet: { sheetId: 7 } });
+    expect(requests).toContainEqual(expect.objectContaining({ updateCells: expect.objectContaining({
+      range: expect.objectContaining({ sheetId: 7 }), rows: expect.arrayContaining([
+        { values: [{ userEnteredValue: { stringValue: 'Tên' } }, { userEnteredValue: { stringValue: '=1+1' } }] },
+      ]),
+    }) }));
+    expect(requests).toContainEqual(expect.objectContaining({ addSheet: expect.objectContaining({
+      properties: expect.objectContaining({ title: 'Tư liệu' }),
+    }) }));
+  });
+});

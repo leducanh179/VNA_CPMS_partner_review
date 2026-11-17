@@ -1,3 +1,4 @@
+import { EngagementApplicationService } from '../../engagement/application/engagement.application-service';
 import { createHash } from 'node:crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { APPROVAL_PRESETS, canDecideCampaignTask, resolveApprovalRoute, type AccessPermission, type AccessResource, type ActorContext, type ApprovalPreset, type CampaignLevelCode } from '@cpms/domain';
@@ -49,7 +50,8 @@ function routeFor(config: WorkflowConfiguration, facts: WorkflowFacts, receiving
 @Injectable()
 export class CampaignWorkflowApplicationService {
   constructor(@Inject(CampaignWorkflowRepository) private readonly repository: CampaignWorkflowRepository,
-    @Inject(AccessApplicationService) readonly access: AccessApplicationService) {}
+    @Inject(AccessApplicationService) readonly access: AccessApplicationService,
+    @Inject(EngagementApplicationService) private readonly engagement: EngagementApplicationService) {}
 
   configuration(actor: ActorContext) { return this.access.run(actor, async () => { this.access.require('access.manage'); return this.repository.configuration(); }); }
   initialize(actor: ActorContext, departmentId: string, demo: boolean) {
@@ -416,7 +418,9 @@ export class CampaignWorkflowApplicationService {
         before: { revisionId: revision?.id ?? null, state: revision?.state ?? 'LEGACY_UNASSESSED', activeAssignmentIds: facts.assignments.filter((a) => !a.endsAt).map((a) => a.id) },
         after: { revisionId: afterRevision?.id ?? null, state: afterRevision?.state, activeAssignmentIds: afterFacts.assignments.filter((a) => !a.endsAt).map((a) => a.id) },
         ...(actor.session?.mode === 'DEMO_IMPERSONATION' ? { demo: true } : actor.session?.mode === 'ADMIN_ASSIST' ? { adminAssist: true } : {}) });
-      return this.repository.finish(commandId, campaignId, workflow);
+      const result = await this.repository.finish(commandId, campaignId, workflow);
+      if (input.operation === 'SUBMIT') await this.engagement.reconcile(actor);
+      return result;
     });
   }
 

@@ -1,5 +1,7 @@
 import type { CampaignSummary } from '@cpms/domain';
 
+type StatusSource = { isDeleted?: boolean; lifecycleState?: string };
+
 type Tone = 'draft' | 'pending' | 'approved' | 'planned' | 'running' | 'paused' | 'stopped' | 'completed';
 
 const APPEARANCE: Record<Tone, { panel: string; dot: string; label: string; value: string; badge: string; chip: string }> = {
@@ -13,7 +15,7 @@ const APPEARANCE: Record<Tone, { panel: string; dot: string; label: string; valu
   completed: { panel: 'border-violet-600 bg-violet-50', dot: 'bg-violet-600', label: 'text-violet-800', value: 'text-violet-950', badge: 'border-violet-300 bg-white text-violet-900', chip: 'border-violet-400 bg-violet-100 text-violet-950' },
 };
 
-function statusTone(campaign: Pick<CampaignSummary, 'isDeleted' | 'lifecycleState'> | undefined, status: string): Tone {
+export function campaignStatusTone(campaign: StatusSource | undefined, status: string): Tone {
   if (campaign?.isDeleted) return 'stopped';
   switch (status) {
     case 'Nháp': case 'Dự thảo': return 'draft';
@@ -39,15 +41,19 @@ function statusTone(campaign: Pick<CampaignSummary, 'isDeleted' | 'lifecycleStat
   }
 }
 
-export function CampaignStatusChip({ campaign, status }: { campaign?: Pick<CampaignSummary, 'isDeleted' | 'lifecycleState'> | undefined; status: string }) {
-  const appearance = APPEARANCE[statusTone(campaign, status)];
+export function campaignStatusBarClass(campaign: StatusSource | undefined, status: string) {
+  return APPEARANCE[campaignStatusTone(campaign, status)].chip;
+}
+
+export function CampaignStatusChip({ campaign, status }: { campaign?: StatusSource | undefined; status: string }) {
+  const appearance = APPEARANCE[campaignStatusTone(campaign, status)];
   return <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${appearance.chip}`}>
     <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${appearance.dot}`} />{status}
   </span>;
 }
 
 export function CampaignStatusHighlight({ campaign, status, label }: { campaign: CampaignSummary; status: string; label: string }) {
-  const appearance = APPEARANCE[statusTone(campaign, status)];
+  const appearance = APPEARANCE[campaignStatusTone(campaign, status)];
   return <div className={`flex min-h-24 flex-wrap items-center justify-between gap-3 rounded-xl border border-l-4 px-5 py-4 shadow-sm ${appearance.panel}`}>
     <div className="min-w-0">
       <p className={`text-xs font-bold uppercase tracking-wider ${appearance.label}`}>{label}</p>

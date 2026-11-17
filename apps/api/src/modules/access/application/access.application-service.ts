@@ -99,6 +99,11 @@ export class AccessApplicationService {
     for (const field of changes.fields) this.require('campaign.update', resource, field.fieldKey);
     return changes.fields;
   }
+  canManageCampaignLink(resource: AccessResource) {
+    const identity = this.snapshot().identity;
+    return !resource.deleted && !identity.readOnlyDemo && identity.mode === 'DIRECT'
+      && (identity.effectiveSuperadmin || identity.effectiveActorId === resource.createdByActorId);
+  }
   capabilities(resource: AccessResource): CampaignAccessCapabilities {
     const permissions: CampaignAccessCapabilities['permissions'] = {};
     for (const permission of ['campaign.read','campaign.update','campaign.delete','campaign.restore','campaign.purge','campaign.export','campaign.import',
@@ -109,7 +114,7 @@ export class AccessApplicationService {
     const fields = new Set([...Object.keys(CAMPAIGN_FIELD_BY_KEY), ...Object.values(CAMPAIGN_ACCESS_FIELD_ALIASES)].map(canonicalCampaignFieldKey));
     const editableFields = resource.workflowEditLocked ? [] : [...fields].filter((fieldKey) => !isProtectedCampaignField(fieldKey) && this.check('campaign.update', resource, fieldKey).allowed);
     if (resource.workflowEditLocked) permissions['campaign.update'] = false;
-    return { permissions, editableFields, canEditAnyField: editableFields.length > 0, fieldReadMasking: false };
+    return { permissions, editableFields, canEditAnyField: editableFields.length > 0, fieldReadMasking: false, canManageLinkSharing: this.canManageCampaignLink(resource) };
   }
   async requireProposedFields(requesterId: string, resource: AccessResource, before: Readonly<Record<string, unknown>>, patch: Readonly<Record<string, unknown>>) {
     this.require('campaign.approve', resource);

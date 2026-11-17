@@ -6,6 +6,7 @@ import { useAccessCapabilities } from '../access-context';
 import { requestJson } from '../lib/api';
 import { PersonalNotes } from './personal-notes';
 import { AiAssistant } from './ai-assistant';
+import { EngagementCenter } from './engagement-center';
 
 const navigation = [
   { path: '/', label: 'Trợ lý AI', icon: 'comments' },
@@ -112,6 +113,7 @@ export function AppShell({ pathname, children }: PropsWithChildren<{ pathname: s
           <AiAssistant home={pathname === '/'} path={pathname} onDockWidthChange={setAiDockWidth}/>
         </main>
         <PersonalNotes key={me.account.id}/>
+        <EngagementCenter key={`missions-${me.account.id}`} accountId={me.account.id} pathname={pathname}/>
       </div>
     </div>
   );

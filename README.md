@@ -3,10 +3,13 @@
 This is a source-only review snapshot of the CPMS modular monolith (React/Vite,
 NestJS, PostgreSQL/Prisma). It is for partner technical assessment, not a
 production deployment package or a live-data export. It was refreshed on
-26 October 2026 from the online source commit
-`e1e3b8515ff101b49adf9caf857f3c5ed434a768`.
+17 November 2026 against the running release
+`campaign-quick-sheet-20261113-d24e422` at https://cpmsvna.com.
+The corresponding source checkpoint is
+`f67b46550274db420e6287993dfdea4c105a16aa` (application commit `d24e422`).
+Read [REVIEW.md](REVIEW.md) for provenance, review priorities and verification.
 
-The copy deliberately has **no original Git history**, no live database, no
+The copy deliberately has **no original private Git history**, no live database, no
 live deployment settings, no historical delivery notes, and no user-provided
 Material Portal snapshot. The Material seed exports empty collections so a
 fresh database can be initialized without importing real operational records.

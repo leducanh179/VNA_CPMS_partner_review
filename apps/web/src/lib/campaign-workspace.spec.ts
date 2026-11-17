@@ -2,7 +2,7 @@ import type { CampaignSummary } from '@cpms/domain';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { CampaignTable } from '../components/campaign-table';
+import { CampaignTable, CampaignTimeline } from '../components/campaign-table';
 import { CAMPAIGN_LIST_PATH } from './api';
 import {
   createCampaignWorkspaceStore,
@@ -140,6 +140,16 @@ describe('Campaign workspace integration', () => {
 
     expect(markup).toContain(`href="${target}"`);
     expect(matchRoute(target)).toEqual({ name: 'campaign-detail', id: firstCampaign.id });
+  });
+
+  it('shows a readonly Timeline for recent Campaigns, including links for undated rows', () => {
+    const undated = { ...firstCampaign, id: '10000000-0000-4000-8000-000000000002', startDate: null, endDate: null };
+    const markup = renderToStaticMarkup(createElement(CampaignTimeline, { campaigns: [firstCampaign, undated] }));
+    expect(markup).toContain('Timeline các chiến dịch gần đây');
+    expect(markup).toContain('01/09/2026 đến 30/09/2026');
+    expect(markup).toContain('Chưa xác định thời gian');
+    expect(markup).toContain(`href="${campaignDetailPath(undated.id)}"`);
+    expect(markup).not.toContain('Sửa dòng');
   });
 
   it('routes the dedicated Material create form back into the existing module', () => {

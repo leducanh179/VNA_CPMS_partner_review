@@ -1,5 +1,6 @@
 import type {
   CloudDriveItem,
+  CloudManagedSpreadsheetPort,
   CloudDrivePage,
   CloudDrivePermission,
   CloudDrivePort,
@@ -25,6 +26,10 @@ export class GoogleProviderError extends Error {
 const MAX_ROWS = 1_000;
 const MAX_COLUMNS = 100;
 const MAX_RESPONSE_BYTES = 2_000_000;
+const GOOGLE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+const CAMPAIGN_EXPORT_PROPERTY = 'cpmsCampaignExport';
+const MANAGED_SHEET_FIELDS = 'id,mimeType,trashed,appProperties,capabilities(canEdit)';
+type ManagedSheetFile = { id?: string; mimeType?: string; trashed?: boolean; appProperties?: Record<string, string>; capabilities?: { canEdit?: boolean } };
 const pendingReads = new Map<string, Promise<unknown>>();
 
 function providerError(status: number, method: string): GoogleProviderError {
@@ -163,7 +168,7 @@ function driveQueryLiteral(value: string) {
 }
 
 @Injectable()
-export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, CloudDrivePort {
+export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, CloudDrivePort, CloudManagedSpreadsheetPort {
   authorizationUrl(input: { clientId: string; callbackUrl: string; state: string; scopes: readonly string[] }) {
     const parameters = new URLSearchParams({
       client_id: input.clientId,
@@ -328,6 +333,94 @@ export class GoogleApiAdapter implements UserOAuthPort, CloudSpreadsheetPort, Cl
       },
     );
     return { sheetId: target.sheetId, title: target.title };
+  }
+
+  async replaceManagedSpreadsheet(input: Parameters<CloudManagedSpreadsheetPort['replaceManagedSpreadsheet']>[0]): Promise<string> {
+    const mimeType = GOOGLE_SHEET_MIME;
+    const keyName = CAMPAIGN_EXPORT_PROPERTY;
+    const fields = MANAGED_SHEET_FIELDS;
+    const headers = { ...bearer(input.accessToken), 'Content-Type': 'application/json' };
+    const drive = 'https://www.googleapis.com/drive/v3/files';
+    if (!input.sheets.length || input.sheets.some(sheet => sheet.rows.some(row => row.some(cell => String(cell ?? '').length > 50_000)))) {
+      throw new GoogleProviderError('LIMIT', 'Cần ít nhất một tab và mỗi ô Google Sheet chỉ được tối đa 50.000 ký tự.');
+    }
+    const packed = input.sheets.map(sheet => ({
+      name: sheet.name,
+      columnCount: Math.max(2, ...sheet.rows.map(row => row.length)),
+      rows: sheet.rows.map(row => ({ values: row.map(cell => ({ userEnteredValue: { stringValue: String(cell ?? '') } })) })),
+    }));
+    if (Buffer.byteLength(JSON.stringify(packed)) > MAX_RESPONSE_BYTES) {
+      throw new GoogleProviderError('LIMIT', 'Nội dung xuất Google Sheet vượt quá 2 MB.');
+    }
+
+    let file: ManagedSheetFile;
+    if (input.spreadsheetId) {
+      file = await this.managedSpreadsheet(input.accessToken, input.spreadsheetId);
+    } else {
+      // Recover the file after an interrupted creation or an uncommitted database write.
+      const parameters = new URLSearchParams({
+        q: `trashed = false and mimeType = '${mimeType}' and appProperties has { key='${keyName}' and value=${driveQueryLiteral(input.key)} }`,
+        spaces: 'drive', corpora: 'user', fields: `nextPageToken,files(${fields})`, pageSize: '2',
+      });
+      const found = await requestJson<{ files?: ManagedSheetFile[]; nextPageToken?: string }>(`${drive}?${parameters}`, { method: 'GET', headers }, true);
+      if (found.nextPageToken || (found.files?.length ?? 0) > 1) {
+        throw new GoogleProviderError('PROVIDER', 'Tìm thấy nhiều bản xuất của chiến dịch. Quản trị viên cần kiểm tra trên Drive.');
+      }
+      file = found.files?.[0] ?? await requestJson<ManagedSheetFile>(`${drive}?fields=${encodeURIComponent(fields)}`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ name: input.title, mimeType, appProperties: { [keyName]: input.key } }),
+      });
+    }
+    const spreadsheetId = this.requireManagedSpreadsheet(file, input.key);
+    const metadata = await this.metadata(input.accessToken, spreadsheetId);
+    const sheetIds = new Set(metadata.tabs.map(tab => tab.sheetId));
+    let nextId = 1;
+    const retainedIds = new Set<number>();
+    const requests: object[] = [];
+    for (const sheet of packed) {
+      const existing = metadata.tabs.find(tab => tab.title === sheet.name);
+      while (sheetIds.has(nextId)) nextId += 1;
+      const sheetId = existing?.sheetId ?? nextId++;
+      retainedIds.add(sheetId);
+      const gridProperties = { rowCount: Math.max(2, sheet.rows.length), columnCount: sheet.columnCount, frozenRowCount: 1, frozenColumnCount: 0 };
+      if (existing) {
+        requests.push({ updateSheetProperties: { properties: { sheetId, gridProperties },
+          fields: 'gridProperties(rowCount,columnCount,frozenRowCount,frozenColumnCount)' } });
+      } else {
+        requests.push({ addSheet: { properties: { sheetId, title: sheet.name, gridProperties } } });
+      }
+      // A bounded range clears leftover cells when the new projection has fewer values.
+      requests.push({ updateCells: { range: { sheetId, startRowIndex: 0, startColumnIndex: 0,
+        endRowIndex: gridProperties.rowCount, endColumnIndex: gridProperties.columnCount }, rows: sheet.rows, fields: 'userEnteredValue' } });
+    }
+    for (const tab of metadata.tabs) if (!retainedIds.has(tab.sheetId)) requests.push({ deleteSheet: { sheetId: tab.sheetId } });
+    requests.push({ updateSpreadsheetProperties: { properties: { title: input.title }, fields: 'title' } });
+    await requestJson(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`, {
+      method: 'POST', headers, body: JSON.stringify({ requests }),
+    });
+    return spreadsheetId;
+  }
+
+  async grantSpreadsheetViewer(input: Parameters<CloudManagedSpreadsheetPort['grantSpreadsheetViewer']>[0]) {
+    const file = await this.managedSpreadsheet(input.accessToken, input.spreadsheetId);
+    const id = this.requireManagedSpreadsheet(file, input.key);
+    const existing = await this.listPermissions(input.accessToken, id);
+    if (existing.some(item => item.type === 'user' && item.emailAddress?.toLowerCase() === input.email.toLowerCase())) return;
+    await this.createPermission({ accessToken: input.accessToken, fileId: id, type: 'user', role: 'reader', emailAddress: input.email });
+  }
+
+  private managedSpreadsheet(token: string, spreadsheetId: string) {
+    return requestJson<ManagedSheetFile>(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(spreadsheetId)}?supportsAllDrives=true&fields=${encodeURIComponent(MANAGED_SHEET_FIELDS)}`,
+      { method: 'GET', headers: bearer(token) }, true);
+  }
+
+  private requireManagedSpreadsheet(file: ManagedSheetFile, key: string) {
+    if (!file.id || file.trashed || file.mimeType !== GOOGLE_SHEET_MIME
+      || file.appProperties?.[CAMPAIGN_EXPORT_PROPERTY] !== key || file.capabilities?.canEdit !== true) {
+      throw new GoogleProviderError('VIEW_ONLY', 'Bản xuất Google Sheet đã bị xóa hoặc tài khoản dùng chung không còn quyền sửa.');
+    }
+    return file.id;
   }
 
   async getItem(accessToken: string, fileId: string, resourceKey?: string): Promise<CloudDriveItem> {

@@ -8,7 +8,7 @@ import { IdentityApplicationService, LOCAL_SESSION_COOKIE } from '../identity/ap
 import { isCookieMutationTrusted } from '../identity/application/local-auth-security';
 import { AccessApplicationService } from '../access/application/access.application-service';
 import { partnerDemoRequestAllowed } from '../identity/application/partner-demo-security';
-import { isPublicMaterialRead, PublicMaterialRateLimit } from './public-material-read';
+import { isPublicGuestRead, isPublicMaterialRead, PublicMaterialRateLimit } from './public-material-read';
 
 @Injectable()
 export class DemoActorMiddleware {
@@ -18,7 +18,7 @@ export class DemoActorMiddleware {
     @Inject(AccessApplicationService) private readonly access: AccessApplicationService) {}
 
   async use(request: RequestWithActor, response: Response, next: NextFunction) {
-    if (isPublicMaterialRead(request.method, request.originalUrl.split('?')[0] ?? '')) {
+    if (isPublicMaterialRead(request.method, request.originalUrl.split('?')[0] ?? '') || isPublicGuestRead(request.method, request.originalUrl.split('?')[0] ?? '')) {
       response.setHeader('Cache-Control', 'no-store');
       if (!this.publicMaterialLimit.allow(request.ip || request.socket.remoteAddress || 'unknown')) {
         response.setHeader('Retry-After', '60'); response.status(429).json({ message: 'Vui lòng thử lại sau.' }); return;

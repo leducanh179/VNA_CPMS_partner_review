@@ -131,6 +131,7 @@ export function CampaignNewPage({ notify }: { notify(message: string): void }) {
         setSavedCampaign(created);
         if (!savedCampaign) window.history.replaceState(null, '', `/campaigns/new?saved=${encodeURIComponent(created.id)}`);
       }
+      window.dispatchEvent(new Event('cpms:workflow-updated'));
       return created;
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : 'Không thể tạo chiến dịch.';
